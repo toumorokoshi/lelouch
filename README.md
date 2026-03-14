@@ -12,7 +12,7 @@ The goal of lelouch is to be a tool-agnostic framework, primarily focused on get
 
 ## Overall approach
 
-lelouch runs as a daemon (or foregrounded process), that checks as new work needs to be done, at a particular time. Once a task reached the desired time, it will execute.
+lelouch runs as a daemon (or foregrounded process), that checks as new work needs to be done, at a particular time. Once a task reached the desired time, it will execute it in the configured
 
 lelouch requires some form of local task management to pull from. I recommend [beads](https://github.com/steveyegge/beads).
 
@@ -30,7 +30,9 @@ The config file lists each of the repositories it wants to work on, and the agen
 ```toml
 [[my-project]]
 path = "~/git/my-project"
+executor = "antigravity"
 
 [[another-project]]
 path = "~/git/another-project"
+executor = "cursor-agent"
 ```
