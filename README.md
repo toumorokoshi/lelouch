@@ -63,6 +63,14 @@ Use `-v` for verbose/debug logging:
 lelouch -v run
 ```
 
+### Add your repository to lelouch
+
+Initialize and modify the global config, adding the directory, with:
+
+```bash
+lelouch init . --executor=antigravity
+```
+
 ### Queue a deferred task
 
 Add a task to a repository's work database, optionally deferred until a specific time:

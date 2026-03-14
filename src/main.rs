@@ -28,12 +28,36 @@ async fn main() -> Result<()> {
         )
         .init();
 
+    // Handle init before loading config (since config may not exist yet)
+    if let Commands::Init {
+        path,
+        executor,
+        name,
+    } = &cli.command
+    {
+        let abs_path = std::fs::canonicalize(path)
+            .with_context(|| format!("could not resolve path: {path}"))?;
+        let repo_name = name.clone().unwrap_or_else(|| {
+            abs_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unnamed".to_string())
+        });
+        let path_str = abs_path.to_string_lossy().to_string();
+
+        let cfg_path = config::add_repo(cli.config.as_deref(), &repo_name, &path_str, executor)?;
+        println!("Added repository '{repo_name}' ({path_str})");
+        println!("  executor: {executor}");
+        println!("  config: {}", cfg_path.display());
+        return Ok(());
+    }
+
     // Load config
     let cfg = if let Some(ref path) = cli.config {
         config::load_config_from(std::path::Path::new(path))?
     } else {
         config::load_config().context(
-            "failed to load config; create one or pass --config. \
+            "failed to load config; run `lelouch init` first or pass --config. \
              See `lelouch --help` for config location.",
         )?
     };
@@ -41,6 +65,7 @@ async fn main() -> Result<()> {
     let work_db: Arc<dyn work_db::WorkDb> = Arc::new(beads::BeadsDb::new());
 
     match cli.command {
+        Commands::Init { .. } => unreachable!(),
         Commands::Run => {
             let daemon = daemon::Daemon::new(cfg.repositories.clone(), work_db);
             daemon.run().await?;
