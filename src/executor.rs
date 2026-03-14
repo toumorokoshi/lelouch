@@ -22,6 +22,9 @@ pub fn resolve_executor(name: &str) -> Result<Box<dyn Executor>> {
         "antigravity" => Ok(Box::new(
             crate::executors::antigravity::AntigravityExecutor::new(),
         )),
+        "cursor-agent" => Ok(Box::new(
+            crate::executors::cursor_agent::CursorAgentExecutor::new(),
+        )),
         other => anyhow::bail!("unknown executor: {other}"),
     }
 }

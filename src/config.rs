@@ -25,7 +25,7 @@ pub struct RepoConfig {
     pub name: String,
     /// Path to the repository on disk. Supports `~` expansion.
     pub path: String,
-    /// Which executor to use (e.g. "antigravity").
+    /// Which executor to use (e.g. "antigravity", "cursor-agent").
     pub executor: String,
     /// Polling interval in seconds (default: 60).
     #[serde(default = "default_poll_interval")]

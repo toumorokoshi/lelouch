@@ -39,6 +39,8 @@ path = "~/git/another-project"
 executor = "antigravity"
 ```
 
+Supported executors: `antigravity`, `cursor-agent` (Cursor Agent CLI; requires `agent` on PATH).
+
 ## Building
 
 ```bash
@@ -68,7 +70,7 @@ lelouch -v run
 Initialize and modify the global config, adding the directory, with:
 
 ```bash
-lelouch init . --executor=antigravity
+lelouch init . --executor=antigravity   # or --executor=cursor-agent
 ```
 
 ### Queue a deferred task
