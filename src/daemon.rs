@@ -72,8 +72,7 @@ impl Daemon {
             .min()
             .unwrap_or(60);
 
-        let mut interval =
-            tokio::time::interval(tokio::time::Duration::from_secs(min_interval));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(min_interval));
 
         info!(
             poll_interval_secs = min_interval,

@@ -38,10 +38,5 @@ pub trait WorkDb: Send + Sync {
     fn set_in_progress(&self, task_id: &str, repo_path: &Path) -> Result<()>;
 
     /// Create a new deferred task.
-    fn create_deferred(
-        &self,
-        title: &str,
-        defer_until: &str,
-        repo_path: &Path,
-    ) -> Result<Task>;
+    fn create_deferred(&self, title: &str, defer_until: &str, repo_path: &Path) -> Result<Task>;
 }

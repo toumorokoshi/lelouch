@@ -42,8 +42,7 @@ impl BeadsDb {
             );
         }
 
-        let stdout = String::from_utf8(output.stdout)
-            .context("bd output was not valid UTF-8")?;
+        let stdout = String::from_utf8(output.stdout).context("bd output was not valid UTF-8")?;
         Ok(stdout)
     }
 
@@ -58,10 +57,7 @@ impl BeadsDb {
 
 impl WorkDb for BeadsDb {
     fn poll_ready(&self, repo_path: &Path) -> Result<Vec<Task>> {
-        let output = Self::run_bd(
-            &["ready", "--json", "--limit", "0"],
-            repo_path,
-        )?;
+        let output = Self::run_bd(&["ready", "--json", "--limit", "0"], repo_path)?;
         let tasks = Self::parse_tasks(&output)?;
         info!(
             repo = %repo_path.display(),
@@ -86,20 +82,12 @@ impl WorkDb for BeadsDb {
     }
 
     fn set_in_progress(&self, task_id: &str, repo_path: &Path) -> Result<()> {
-        Self::run_bd(
-            &["set-state", task_id, "in_progress"],
-            repo_path,
-        )?;
+        Self::run_bd(&["set-state", task_id, "in_progress"], repo_path)?;
         info!(task_id, "marked task as in_progress");
         Ok(())
     }
 
-    fn create_deferred(
-        &self,
-        title: &str,
-        defer_until: &str,
-        repo_path: &Path,
-    ) -> Result<Task> {
+    fn create_deferred(&self, title: &str, defer_until: &str, repo_path: &Path) -> Result<Task> {
         let output = Self::run_bd(
             &[
                 "create",
@@ -117,7 +105,10 @@ impl WorkDb for BeadsDb {
         // bd create --json --silent returns a single object, not an array
         let task: Task =
             serde_json::from_str(&output).context("failed to parse bd create output")?;
-        info!(task_id = task.id, title, defer_until, "created deferred task");
+        info!(
+            task_id = task.id,
+            title, defer_until, "created deferred task"
+        );
         Ok(task)
     }
 }

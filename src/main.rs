@@ -46,11 +46,7 @@ async fn main() -> Result<()> {
             daemon.run().await?;
         }
         Commands::Queue { command } => match command {
-            QueueCommands::Add {
-                repo,
-                title,
-                defer,
-            } => {
+            QueueCommands::Add { repo, title, defer } => {
                 let repo_config = cfg
                     .repositories
                     .iter()
@@ -85,10 +81,7 @@ async fn main() -> Result<()> {
                 let ready_count = ready.map(|t| t.len()).unwrap_or(0);
                 println!(
                     "  {} ({})\n    executor: {}\n    ready tasks: {}\n",
-                    repo.name,
-                    repo.path,
-                    repo.executor,
-                    ready_count
+                    repo.name, repo.path, repo.executor, ready_count
                 );
             }
         }
