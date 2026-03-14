@@ -30,6 +30,10 @@ This generally follows the recommendations in https://justin.poehnelt.com/posts/
 
 Polling for new tasks is done incrementally, with checkpointing on when it polled last if the work database supports that type of iteration.
 
+### Work queues are single worker
+
+Since this tool is focused in single directories of code, the work queues are synchronous: only one agent will execute in a given repository at a time.
+
 ### Startup
 
 When lelouch starts, it reads the whole target database (e.g. beads) for all tasks enqueued, for each repository: this ensures that even the proces dies, it will be able to recover by launching again.

@@ -2,17 +2,18 @@ use crate::config::RepoConfig;
 use crate::executor::resolve_executor;
 use crate::work_db::{Task, WorkDb};
 use anyhow::Result;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::{error, info};
 
 /// The daemon manages the poll loop across all configured repositories.
+/// At most one task runs at a time; each poll dispatches one ready task (if any) and waits for it.
 pub struct Daemon {
     repos: Vec<RepoConfig>,
     work_db: Arc<dyn WorkDb>,
     /// Track tasks we've already dispatched (to avoid double-dispatch).
-    in_flight: Arc<Mutex<HashSet<String>>>,
+    in_flight: RefCell<HashSet<String>>,
 }
 
 impl Daemon {
@@ -20,7 +21,7 @@ impl Daemon {
         Self {
             repos,
             work_db,
-            in_flight: Arc::new(Mutex::new(HashSet::new())),
+            in_flight: RefCell::new(HashSet::new()),
         }
     }
 
@@ -93,48 +94,45 @@ impl Daemon {
         }
     }
 
-    /// Poll all repos for ready tasks and dispatch them.
+    /// Poll all repos; dispatch at most one ready task and wait for it to complete.
     async fn poll_all_repos(&self) {
-        for repo in &self.repos {
-            if let Err(e) = self.poll_repo(repo).await {
-                error!(
-                    repo = repo.name,
-                    error = %e,
-                    "error polling repo"
-                );
-            }
+        if !self.in_flight.borrow().is_empty() {
+            return;
         }
-    }
 
-    /// Poll a single repo and dispatch any ready tasks.
-    async fn poll_repo(&self, repo: &RepoConfig) -> Result<()> {
-        let repo_path = repo.resolved_path()?;
-        let tasks = self.work_db.poll_ready(&repo_path)?;
-
-        for task in tasks {
-            // Skip tasks already in flight
-            {
-                let in_flight = self.in_flight.lock().await;
-                if in_flight.contains(&task.id) {
+        let mut candidate: Option<(RepoConfig, Task)> = None;
+        for repo in &self.repos {
+            let repo_path = match repo.resolved_path() {
+                Ok(p) => p,
+                Err(e) => {
+                    error!(repo = repo.name, error = %e, "failed to resolve repo path");
                     continue;
                 }
+            };
+            let tasks = match self.work_db.poll_ready(&repo_path) {
+                Ok(t) => t,
+                Err(e) => {
+                    error!(repo = repo.name, error = %e, "error polling repo");
+                    continue;
+                }
+            };
+            let in_flight = self.in_flight.borrow();
+            if let Some(task) = tasks.into_iter().find(|t| !in_flight.contains(&t.id)) {
+                candidate = Some((repo.clone(), task));
+                break;
             }
-
-            self.dispatch_task(repo, &task).await;
         }
 
-        Ok(())
+        if let Some((repo, task)) = candidate {
+            self.dispatch_task(&repo, &task).await;
+        }
     }
 
-    /// Dispatch a single task to the appropriate executor.
+    /// Dispatch a single task to the appropriate executor and wait for it to complete.
     async fn dispatch_task(&self, repo: &RepoConfig, task: &Task) {
         let task_id = task.id.clone();
 
-        // Mark as in-flight
-        {
-            let mut in_flight = self.in_flight.lock().await;
-            in_flight.insert(task_id.clone());
-        }
+        self.in_flight.borrow_mut().insert(task_id.clone());
 
         info!(
             task_id = task.id,
@@ -187,10 +185,6 @@ impl Daemon {
             }
         }
 
-        // Remove from in-flight
-        {
-            let mut in_flight = self.in_flight.lock().await;
-            in_flight.remove(&task_id);
-        }
+        self.in_flight.borrow_mut().remove(&task_id);
     }
 }
