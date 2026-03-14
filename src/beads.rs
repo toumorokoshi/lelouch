@@ -47,27 +47,72 @@ impl BeadsDb {
     }
 
     /// Parse JSON output from bd into a Vec<Task>.
-    /// Accepts either a JSON array or an object with "issues" or "items" array.
+    /// Accepts: single JSON array; object with issues/items/data/results/tasks;
+    /// or NDJSON (one JSON object per line). Skips leading non-JSON (e.g. log prefix).
+    /// Treats the specific plain-text "no issues" message from bd as empty list.
     fn parse_tasks(json: &str) -> Result<Vec<Task>> {
         let json = json.trim();
+        if json.is_empty() {
+            return Ok(Vec::new());
+        }
+        if json.eq_ignore_ascii_case("no issues found.") {
+            return Ok(Vec::new());
+        }
+        let json = Self::strip_json_preamble(json);
+        if let Ok(tasks) = Self::parse_tasks_single(json) {
+            return Ok(tasks);
+        }
+        let mut tasks = Vec::new();
+        for line in json.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Ok(t) = serde_json::from_str::<Task>(line) {
+                tasks.push(t);
+            } else if let Ok(ts) = Self::parse_tasks_single(line) {
+                tasks.extend(ts);
+            }
+        }
+        if tasks.is_empty() {
+            anyhow::bail!("failed to parse bd JSON output (not array, object with issues/items/data/results/tasks, or NDJSON)");
+        }
+        Ok(tasks)
+    }
+
+    fn strip_json_preamble(s: &str) -> &str {
+        let s = s.trim_start();
+        if s.starts_with('[') || s.starts_with('{') {
+            return s;
+        }
+        s.find('[')
+            .or_else(|| s.find('{'))
+            .map(|i| &s[i..])
+            .unwrap_or(s)
+    }
+
+    fn parse_tasks_single(json: &str) -> Result<Vec<Task>> {
         let value: serde_json::Value =
             serde_json::from_str(json).context("failed to parse bd JSON output")?;
-        let tasks: Vec<Task> = match value {
-            serde_json::Value::Array(a) => serde_json::from_value(serde_json::Value::Array(a))
-                .context("failed to parse bd JSON array")?,
-            serde_json::Value::Object(o) => {
-                let arr = o
-                    .get("issues")
-                    .or_else(|| o.get("items"))
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("bd JSON object has no 'issues' or 'items' array"))?;
-                serde_json::from_value(serde_json::Value::Array(arr))
-                    .context("failed to parse bd JSON issues/items array")?
-            }
+        let arr = match &value {
+            serde_json::Value::Array(a) => a.clone(),
+            serde_json::Value::Object(o) => o
+                .get("issues")
+                .or_else(|| o.get("items"))
+                .or_else(|| o.get("data"))
+                .or_else(|| o.get("results"))
+                .or_else(|| o.get("tasks"))
+                .and_then(|v| v.as_array())
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "bd JSON object has no 'issues'/'items'/'data'/'results'/'tasks' array"
+                    )
+                })?,
             _ => anyhow::bail!("bd JSON output is neither array nor object"),
         };
-        Ok(tasks)
+        serde_json::from_value(serde_json::Value::Array(arr))
+            .context("failed to parse bd JSON array into tasks")
     }
 }
 
@@ -98,7 +143,7 @@ impl WorkDb for BeadsDb {
     }
 
     fn set_in_progress(&self, task_id: &str, repo_path: &Path) -> Result<()> {
-        Self::run_bd(&["set-state", task_id, "status=in_progress"], repo_path)?;
+        Self::run_bd(&["update", task_id, "--status", "in_progress"], repo_path)?;
         info!(task_id, "marked task as in_progress");
         Ok(())
     }
@@ -129,8 +174,14 @@ impl WorkDb for BeadsDb {
     }
 
     fn add_comment(&self, task_id: &str, body: &str, repo_path: &Path) -> Result<()> {
-        Self::run_bd(&["comment", "add", task_id, "--message", body], repo_path)?;
+        Self::run_bd(&["comments", "add", task_id, body], repo_path)?;
         info!(task_id, "added comment to issue");
+        Ok(())
+    }
+
+    fn set_complete(&self, task_id: &str, repo_path: &Path) -> Result<()> {
+        Self::run_bd(&["update", task_id, "--status", "closed"], repo_path)?;
+        info!(task_id, "marked task as complete");
         Ok(())
     }
 }
@@ -143,6 +194,18 @@ mod tests {
     fn test_parse_empty_tasks() {
         let tasks = BeadsDb::parse_tasks("[]").unwrap();
         assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_no_issues_found_plain_text() {
+        let tasks = BeadsDb::parse_tasks("No issues found.\n").unwrap();
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_other_non_json_errors() {
+        assert!(BeadsDb::parse_tasks("error: something went wrong").is_err());
+        assert!(BeadsDb::parse_tasks("not valid json").is_err());
     }
 
     #[test]

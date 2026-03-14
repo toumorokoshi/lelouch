@@ -66,8 +66,8 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init { .. } => unreachable!(),
-        Commands::Run => {
-            let daemon = daemon::Daemon::new(cfg.repositories.clone(), work_db);
+        Commands::Run { dry_run } => {
+            let daemon = daemon::Daemon::new(cfg.repositories.clone(), work_db, dry_run);
             daemon.run().await?;
         }
         Commands::Queue { command } => match command {

@@ -12,15 +12,18 @@ use tracing::{error, info};
 pub struct Daemon {
     repos: Vec<RepoConfig>,
     work_db: Arc<dyn WorkDb>,
+    /// When true, do not dispatch tasks (startup scan and poll only).
+    dry_run: bool,
     /// Track tasks we've already dispatched (to avoid double-dispatch).
     in_flight: RefCell<HashSet<String>>,
 }
 
 impl Daemon {
-    pub fn new(repos: Vec<RepoConfig>, work_db: Arc<dyn WorkDb>) -> Self {
+    pub fn new(repos: Vec<RepoConfig>, work_db: Arc<dyn WorkDb>, dry_run: bool) -> Self {
         Self {
             repos,
             work_db,
+            dry_run,
             in_flight: RefCell::new(HashSet::new()),
         }
     }
@@ -124,7 +127,16 @@ impl Daemon {
         }
 
         if let Some((repo, task)) = candidate {
-            self.dispatch_task(&repo, &task).await;
+            if self.dry_run {
+                info!(
+                    task_id = task.id,
+                    title = task.title,
+                    repo = repo.name,
+                    "dry-run: would dispatch task"
+                );
+            } else {
+                self.dispatch_task(&repo, &task).await;
+            }
         }
     }
 
@@ -134,15 +146,6 @@ impl Daemon {
 
         self.in_flight.borrow_mut().insert(task_id.clone());
 
-        info!(
-            task_id = task.id,
-            title = task.title,
-            repo = repo.name,
-            executor = repo.executor,
-            "dispatching task"
-        );
-
-        // Mark in-progress in the work database
         let repo_path = match repo.resolved_path() {
             Ok(p) => p,
             Err(e) => {
@@ -158,6 +161,14 @@ impl Daemon {
                 "failed to mark task as in_progress"
             );
         }
+
+        info!(
+            task_id = task.id,
+            title = task.title,
+            repo = repo.name,
+            executor = repo.executor,
+            "dispatching task"
+        );
 
         // Resolve executor and run
         let executor = match resolve_executor(&repo.executor) {
@@ -185,6 +196,13 @@ impl Daemon {
                             );
                         }
                     }
+                }
+                if let Err(e) = self.work_db.set_complete(&task.id, &repo_path) {
+                    error!(
+                        task_id = task.id,
+                        error = %e,
+                        "failed to mark task as complete"
+                    );
                 }
             }
             Err(e) => {

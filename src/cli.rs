@@ -19,7 +19,11 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Start the daemon/polling loop (foreground).
-    Run,
+    Run {
+        /// Run without dispatching tasks (startup scan and poll only).
+        #[arg(long)]
+        dry_run: bool,
+    },
 
     /// Initialize config and add a repository.
     Init {

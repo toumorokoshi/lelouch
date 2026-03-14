@@ -13,13 +13,15 @@ pub struct Task {
     pub description: Option<String>,
     pub status: String,
     pub priority: u32,
+    #[serde(alias = "issueType")]
     pub issue_type: String,
     #[serde(default)]
     pub owner: Option<String>,
+    #[serde(alias = "createdAt")]
     pub created_at: DateTime<Utc>,
-    #[serde(default)]
+    #[serde(default, alias = "updatedAt")]
     pub updated_at: Option<DateTime<Utc>>,
-    #[serde(default)]
+    #[serde(default, alias = "deferUntil")]
     pub defer_until: Option<DateTime<Utc>>,
 }
 
@@ -42,4 +44,7 @@ pub trait WorkDb: Send + Sync {
 
     /// Add a comment to an issue (e.g. executor response).
     fn add_comment(&self, task_id: &str, body: &str, repo_path: &Path) -> Result<()>;
+
+    /// Mark a task as complete (e.g. after successful execution).
+    fn set_complete(&self, task_id: &str, repo_path: &Path) -> Result<()>;
 }

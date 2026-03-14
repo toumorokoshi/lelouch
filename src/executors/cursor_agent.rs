@@ -94,7 +94,8 @@ impl Executor for CursorAgentExecutor {
             );
         }
 
-        let stdout = String::from_utf8(output.stdout).context("agent output was not valid UTF-8")?;
+        let stdout =
+            String::from_utf8(output.stdout).context("agent output was not valid UTF-8")?;
         let response = Self::parse_json_result(stdout.trim())?;
         info!(task_id = task.id, "cursor-agent completed successfully");
         Ok(response)
