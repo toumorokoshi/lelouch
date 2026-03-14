@@ -28,11 +28,70 @@ The config file lists each of the repositories it wants to work on, and the agen
 ## Example config.toml
 
 ```toml
-[[my-project]]
+[[repositories]]
+name = "my-project"
 path = "~/git/my-project"
 executor = "antigravity"
 
-[[another-project]]
+[[repositories]]
+name = "another-project"
 path = "~/git/another-project"
-executor = "cursor-agent"
+executor = "antigravity"
+```
+
+## Building
+
+```bash
+cargo build --release
+```
+
+The binary will be at `target/release/lelouch`.
+
+## CLI Usage
+
+### Start the daemon
+
+Run the polling loop in the foreground. Lelouch will continuously check each configured repository for ready tasks and dispatch them to the configured executor.
+
+```bash
+lelouch run
+```
+
+Use `-v` for verbose/debug logging:
+
+```bash
+lelouch -v run
+```
+
+### Queue a deferred task
+
+Add a task to a repository's work database, optionally deferred until a specific time:
+
+```bash
+# Create a task deferred by 2 hours
+lelouch queue add --repo my-project --title "Migrate database" --defer "+2h"
+
+# Create a task deferred until a specific date
+lelouch queue add --repo my-project --title "Review logs" --defer "2026-04-01"
+
+# Create a task with no deferral (immediately ready)
+lelouch queue add --repo my-project --title "Fix typo"
+```
+
+The `--defer` flag accepts any format supported by `bd`: `+6h`, `+1d`, `+2w`, `tomorrow`, `next monday`, `2025-01-15`, or ISO 8601.
+
+### Check status
+
+Show configured repositories and the number of ready tasks in each:
+
+```bash
+lelouch status
+```
+
+### Custom config path
+
+Override the default config file location:
+
+```bash
+lelouch --config /path/to/config.toml run
 ```
