@@ -1,4 +1,4 @@
-use crate::executor::Executor;
+use crate::executor::{ExecutionResponse, Executor};
 use crate::work_db::Task;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -34,7 +34,7 @@ impl Executor for AntigravityExecutor {
         "antigravity"
     }
 
-    async fn execute(&self, task: &Task, repo_path: &Path) -> Result<()> {
+    async fn execute(&self, task: &Task, repo_path: &Path) -> Result<ExecutionResponse> {
         let prompt = Self::build_prompt(task);
 
         info!(
@@ -52,9 +52,7 @@ impl Executor for AntigravityExecutor {
             .await
             .context("failed to spawn antigravity")?;
 
-        if output.status.success() {
-            info!(task_id = task.id, "antigravity completed successfully");
-        } else {
+        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(
                 task_id = task.id,
@@ -69,6 +67,13 @@ impl Executor for AntigravityExecutor {
             );
         }
 
-        Ok(())
+        let stdout = String::from_utf8(output.stdout).context("antigravity output was not valid UTF-8")?;
+        let response = if stdout.trim().is_empty() {
+            None
+        } else {
+            Some(stdout)
+        };
+        info!(task_id = task.id, "antigravity completed successfully");
+        Ok(response)
     }
 }

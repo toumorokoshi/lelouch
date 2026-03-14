@@ -173,8 +173,19 @@ impl Daemon {
         };
 
         match executor.execute(task, &repo_path).await {
-            Ok(()) => {
+            Ok(response) => {
                 info!(task_id = task.id, "task completed successfully");
+                if let Some(ref body) = response {
+                    if !body.trim().is_empty() {
+                        if let Err(e) = self.work_db.add_comment(&task.id, body, &repo_path) {
+                            error!(
+                                task_id = task.id,
+                                error = %e,
+                                "failed to add executor response as comment"
+                            );
+                        }
+                    }
+                }
             }
             Err(e) => {
                 error!(

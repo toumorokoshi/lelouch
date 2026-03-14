@@ -46,11 +46,27 @@ impl BeadsDb {
         Ok(stdout)
     }
 
-    /// Parse JSON array output from bd into a Vec<Task>.
+    /// Parse JSON output from bd into a Vec<Task>.
+    /// Accepts either a JSON array or an object with "issues" or "items" array.
     fn parse_tasks(json: &str) -> Result<Vec<Task>> {
-        // bd --json returns `[]` for empty results
-        let tasks: Vec<Task> =
+        let json = json.trim();
+        let value: serde_json::Value =
             serde_json::from_str(json).context("failed to parse bd JSON output")?;
+        let tasks: Vec<Task> = match value {
+            serde_json::Value::Array(a) => serde_json::from_value(serde_json::Value::Array(a))
+                .context("failed to parse bd JSON array")?,
+            serde_json::Value::Object(o) => {
+                let arr = o
+                    .get("issues")
+                    .or_else(|| o.get("items"))
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("bd JSON object has no 'issues' or 'items' array"))?;
+                serde_json::from_value(serde_json::Value::Array(arr))
+                    .context("failed to parse bd JSON issues/items array")?
+            }
+            _ => anyhow::bail!("bd JSON output is neither array nor object"),
+        };
         Ok(tasks)
     }
 }
@@ -82,7 +98,7 @@ impl WorkDb for BeadsDb {
     }
 
     fn set_in_progress(&self, task_id: &str, repo_path: &Path) -> Result<()> {
-        Self::run_bd(&["set-state", task_id, "in_progress"], repo_path)?;
+        Self::run_bd(&["set-state", task_id, "status=in_progress"], repo_path)?;
         info!(task_id, "marked task as in_progress");
         Ok(())
     }
@@ -110,6 +126,12 @@ impl WorkDb for BeadsDb {
             title, defer_until, "created deferred task"
         );
         Ok(task)
+    }
+
+    fn add_comment(&self, task_id: &str, body: &str, repo_path: &Path) -> Result<()> {
+        Self::run_bd(&["comment", "add", task_id, "--message", body], repo_path)?;
+        info!(task_id, "added comment to issue");
+        Ok(())
     }
 }
 
@@ -144,5 +166,30 @@ mod tests {
         assert_eq!(tasks[0].id, "lelouch-abc");
         assert_eq!(tasks[0].title, "Test task");
         assert!(tasks[0].defer_until.is_some());
+    }
+
+    #[test]
+    fn test_parse_tasks_object_with_issues() {
+        let json = r#"{"issues":[{"id":"x","title":"T","status":"open","priority":1,"issue_type":"task","created_at":"2026-03-14T05:52:27Z"}]}"#;
+        let tasks = BeadsDb::parse_tasks(json).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "x");
+        assert_eq!(tasks[0].title, "T");
+    }
+
+    #[test]
+    fn test_parse_task_with_description() {
+        let json = r#"[{"id":"a","title":"T","description":"Do the thing.","status":"open","priority":1,"issue_type":"task","created_at":"2026-03-14T05:52:27Z"}]"#;
+        let tasks = BeadsDb::parse_tasks(json).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].description.as_deref(), Some("Do the thing."));
+    }
+
+    #[test]
+    fn test_parse_task_with_body_alias() {
+        let json = r#"[{"id":"b","title":"T","body":"Issue body text.","status":"open","priority":1,"issue_type":"task","created_at":"2026-03-14T05:52:27Z"}]"#;
+        let tasks = BeadsDb::parse_tasks(json).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].description.as_deref(), Some("Issue body text."));
     }
 }

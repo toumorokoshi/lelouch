@@ -2,10 +2,14 @@ use crate::work_db::Task;
 use anyhow::Result;
 use std::path::Path;
 
+/// Result of executor run: optional response text to post as a comment on the issue.
+pub type ExecutionResponse = Option<String>;
+
 /// Trait for executing tasks via a coding agent.
 ///
 /// Each executor implementation handles spawning the agent process,
-/// passing the task context, and reporting results.
+/// passing the task context, and reporting results. The returned response
+/// (if any) is posted as a comment on the work-db issue.
 #[async_trait::async_trait]
 pub trait Executor: Send + Sync {
     /// The name of this executor (e.g. "antigravity").
@@ -13,7 +17,8 @@ pub trait Executor: Send + Sync {
     fn name(&self) -> &str;
 
     /// Execute a task in the given repository directory.
-    async fn execute(&self, task: &Task, repo_path: &Path) -> Result<()>;
+    /// Returns the response text to post as a comment on the issue, or None to skip.
+    async fn execute(&self, task: &Task, repo_path: &Path) -> Result<ExecutionResponse>;
 }
 
 /// Resolve an executor by name.

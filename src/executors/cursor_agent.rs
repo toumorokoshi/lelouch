@@ -1,4 +1,4 @@
-use crate::executor::Executor;
+use crate::executor::{ExecutionResponse, Executor};
 use crate::work_db::Task;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -11,9 +11,33 @@ use tracing::{error, info};
 /// and with workspace set to the repository directory.
 pub struct CursorAgentExecutor;
 
+#[derive(serde::Deserialize)]
+struct AgentJsonOutput {
+    #[serde(default)]
+    result: Option<String>,
+}
+
 impl CursorAgentExecutor {
     pub fn new() -> Self {
         Self
+    }
+
+    fn parse_json_result(stdout: &str) -> Result<ExecutionResponse> {
+        let s = stdout.trim();
+        let parse_one = |line: &str| -> Result<ExecutionResponse> {
+            let out: AgentJsonOutput = serde_json::from_str(line).context("invalid agent JSON")?;
+            Ok(out.result.filter(|r| !r.trim().is_empty()))
+        };
+        if let Ok(r) = parse_one(s) {
+            return Ok(r);
+        }
+        let last_line = s.lines().rev().find(|l| !l.trim().is_empty());
+        if let Some(line) = last_line {
+            if let Ok(r) = parse_one(line) {
+                return Ok(r);
+            }
+        }
+        anyhow::bail!("no valid result object in agent JSON output")
     }
 
     fn build_prompt(task: &Task) -> String {
@@ -33,7 +57,7 @@ impl Executor for CursorAgentExecutor {
         "cursor-agent"
     }
 
-    async fn execute(&self, task: &Task, repo_path: &Path) -> Result<()> {
+    async fn execute(&self, task: &Task, repo_path: &Path) -> Result<ExecutionResponse> {
         let prompt = Self::build_prompt(task);
 
         info!(
@@ -45,6 +69,8 @@ impl Executor for CursorAgentExecutor {
 
         let output = Command::new("agent")
             .arg("-p")
+            .arg("--output-format")
+            .arg("json")
             .arg("--workspace")
             .arg(repo_path)
             .arg("--force")
@@ -53,9 +79,7 @@ impl Executor for CursorAgentExecutor {
             .await
             .context("failed to spawn agent (Cursor Agent CLI)")?;
 
-        if output.status.success() {
-            info!(task_id = task.id, "cursor-agent completed successfully");
-        } else {
+        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(
                 task_id = task.id,
@@ -70,6 +94,9 @@ impl Executor for CursorAgentExecutor {
             );
         }
 
-        Ok(())
+        let stdout = String::from_utf8(output.stdout).context("agent output was not valid UTF-8")?;
+        let response = Self::parse_json_result(stdout.trim())?;
+        info!(task_id = task.id, "cursor-agent completed successfully");
+        Ok(response)
     }
 }

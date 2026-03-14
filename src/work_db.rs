@@ -9,7 +9,7 @@ use std::path::Path;
 pub struct Task {
     pub id: String,
     pub title: String,
-    #[serde(default)]
+    #[serde(default, alias = "body")]
     pub description: Option<String>,
     pub status: String,
     pub priority: u32,
@@ -39,4 +39,7 @@ pub trait WorkDb: Send + Sync {
 
     /// Create a new deferred task.
     fn create_deferred(&self, title: &str, defer_until: &str, repo_path: &Path) -> Result<Task>;
+
+    /// Add a comment to an issue (e.g. executor response).
+    fn add_comment(&self, task_id: &str, body: &str, repo_path: &Path) -> Result<()>;
 }
