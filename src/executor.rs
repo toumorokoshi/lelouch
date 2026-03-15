@@ -17,8 +17,14 @@ pub trait Executor: Send + Sync {
     fn name(&self) -> &str;
 
     /// Execute a task in the given repository directory.
+    /// pre_prompt, when present, is prepended to the task prompt for the executor.
     /// Returns the response text to post as a comment on the issue, or None to skip.
-    async fn execute(&self, task: &Task, repo_path: &Path) -> Result<ExecutionResponse>;
+    async fn execute(
+        &self,
+        task: &Task,
+        repo_path: &Path,
+        pre_prompt: Option<&str>,
+    ) -> Result<ExecutionResponse>;
 }
 
 /// Resolve an executor by name.

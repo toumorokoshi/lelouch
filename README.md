@@ -36,10 +36,15 @@ executor = "antigravity"
 [[repositories]]
 name = "another-project"
 path = "~/git/another-project"
-executor = "antigravity"
+executor = "cursor-agent"
+pre_prompt = "Always write tests first. Prefer functional style."
 ```
 
 Supported executors: `antigravity`, `cursor-agent` (Cursor Agent CLI; requires `agent` on PATH).
+
+Optional per-repo settings:
+
+- **`pre_prompt`** — Text injected before the task prompt when dispatching to the executor. Use this to give the agent consistent instructions (e.g. coding style or constraints) for all tasks in that repository.
 
 ## Building
 
@@ -71,6 +76,12 @@ Initialize and modify the global config, adding the directory, with:
 
 ```bash
 lelouch init . --executor=antigravity   # or --executor=cursor-agent
+```
+
+To set a pre-prompt that will be injected before every task for this repo:
+
+```bash
+lelouch init . --executor=cursor-agent --pre-prompt "Always write tests first."
 ```
 
 ### Queue a deferred task

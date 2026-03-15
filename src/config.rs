@@ -30,6 +30,9 @@ pub struct RepoConfig {
     /// Polling interval in seconds (default: 60).
     #[serde(default = "default_poll_interval")]
     pub poll_interval_secs: u64,
+    /// Optional prompt fragment injected before the task prompt for the executor.
+    #[serde(default)]
+    pub pre_prompt: Option<String>,
 }
 
 fn default_poll_interval() -> u64 {
@@ -78,6 +81,7 @@ pub fn add_repo(
     name: &str,
     path: &str,
     executor: &str,
+    pre_prompt: Option<&str>,
 ) -> Result<PathBuf> {
     let cfg_path = match config_override {
         Some(p) => PathBuf::from(p),
@@ -103,6 +107,7 @@ pub fn add_repo(
         path: path.to_string(),
         executor: executor.to_string(),
         poll_interval_secs: default_poll_interval(),
+        pre_prompt: pre_prompt.map(String::from),
     });
 
     // Ensure parent directory exists
@@ -145,6 +150,20 @@ poll_interval_secs = 120
         assert_eq!(config.repositories[0].name, "my-project");
         assert_eq!(config.repositories[0].executor, "antigravity");
         assert_eq!(config.repositories[0].poll_interval_secs, 60);
+        assert_eq!(config.repositories[0].pre_prompt, None);
         assert_eq!(config.repositories[1].poll_interval_secs, 120);
+
+        let with_pre = r#"
+[[repositories]]
+name = "proj"
+path = "~/git/proj"
+executor = "cursor-agent"
+pre_prompt = "Always write tests first."
+"#;
+        let config: Config = toml::from_str(with_pre).unwrap();
+        assert_eq!(
+            config.repositories[0].pre_prompt.as_deref(),
+            Some("Always write tests first.")
+        );
     }
 }

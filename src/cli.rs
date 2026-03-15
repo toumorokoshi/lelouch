@@ -38,6 +38,10 @@ pub enum Commands {
         /// Optional name for the repository (defaults to directory name).
         #[arg(long)]
         name: Option<String>,
+
+        /// Optional prompt fragment injected before the task prompt for the executor.
+        #[arg(long)]
+        pre_prompt: Option<String>,
     },
 
     /// Queue management commands.

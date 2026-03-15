@@ -16,15 +16,21 @@ impl AntigravityExecutor {
         Self
     }
 
-    /// Build the prompt string from a task.
-    fn build_prompt(task: &Task) -> String {
-        let mut prompt = format!("Work on issue {}: {}", task.id, task.title);
-        if let Some(ref desc) = task.description {
-            if !desc.is_empty() {
-                prompt.push_str(&format!("\n\nDescription:\n{desc}"));
+    fn build_prompt(task: &Task, pre_prompt: Option<&str>) -> String {
+        let mut parts = Vec::new();
+        if let Some(pre) = pre_prompt {
+            if !pre.trim().is_empty() {
+                parts.push(pre.trim().to_string());
             }
         }
-        prompt
+        let mut task_prompt = format!("Work on issue {}: {}", task.id, task.title);
+        if let Some(ref desc) = task.description {
+            if !desc.is_empty() {
+                task_prompt.push_str(&format!("\n\nDescription:\n{desc}"));
+            }
+        }
+        parts.push(task_prompt);
+        parts.join("\n\n")
     }
 }
 
@@ -34,8 +40,13 @@ impl Executor for AntigravityExecutor {
         "antigravity"
     }
 
-    async fn execute(&self, task: &Task, repo_path: &Path) -> Result<ExecutionResponse> {
-        let prompt = Self::build_prompt(task);
+    async fn execute(
+        &self,
+        task: &Task,
+        repo_path: &Path,
+        pre_prompt: Option<&str>,
+    ) -> Result<ExecutionResponse> {
+        let prompt = Self::build_prompt(task, pre_prompt);
 
         info!(
             task_id = task.id,

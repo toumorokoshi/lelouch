@@ -33,6 +33,7 @@ async fn main() -> Result<()> {
         path,
         executor,
         name,
+        pre_prompt,
     } = &cli.command
     {
         let abs_path = std::fs::canonicalize(path)
@@ -45,9 +46,18 @@ async fn main() -> Result<()> {
         });
         let path_str = abs_path.to_string_lossy().to_string();
 
-        let cfg_path = config::add_repo(cli.config.as_deref(), &repo_name, &path_str, executor)?;
+        let cfg_path = config::add_repo(
+            cli.config.as_deref(),
+            &repo_name,
+            &path_str,
+            executor,
+            pre_prompt.as_deref(),
+        )?;
         println!("Added repository '{repo_name}' ({path_str})");
         println!("  executor: {executor}");
+        if pre_prompt.is_some() {
+            println!("  pre_prompt: set");
+        }
         println!("  config: {}", cfg_path.display());
         return Ok(());
     }

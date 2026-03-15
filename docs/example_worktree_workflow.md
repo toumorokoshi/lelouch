@@ -64,11 +64,9 @@ bd init --stealth
 
 3. In each *worktree*, initialize lelouch:
 
+**note** add a pre-prompt to ensure that the agent will reset your environment to your desired state before picking up the next task.
+
 ```
 cd ../repo-for-agent
-lelouch init . --executor=cursor-agent
+lelouch init . --executor=cursor-agent --pre-prompt="run `git checkout -B repo-for-agent origin/develop` before running the task"
 ```
-
-
-
-

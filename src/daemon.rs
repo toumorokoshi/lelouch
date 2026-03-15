@@ -7,6 +7,26 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, info};
 
+/// Future that completes when a shutdown signal (SIGINT or SIGTERM) is received.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    let sigterm = async {
+        if let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            sig.recv().await;
+        } else {
+            std::future::pending::<()>().await
+        }
+    };
+    #[cfg(not(unix))]
+    let sigterm = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = sigterm => {}
+    }
+}
+
 /// The daemon manages the poll loop across all configured repositories.
 /// At most one task runs at a time; each poll dispatches one ready task (if any) and waits for it.
 pub struct Daemon {
@@ -87,9 +107,11 @@ impl Daemon {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    self.poll_all_repos().await;
+                    if self.poll_all_repos().await.is_err() {
+                        return Ok(());
+                    }
                 }
-                _ = tokio::signal::ctrl_c() => {
+                _ = shutdown_signal() => {
                     info!("received shutdown signal, exiting");
                     return Ok(());
                 }
@@ -98,9 +120,10 @@ impl Daemon {
     }
 
     /// Poll all repos; dispatch at most one ready task and wait for it to complete.
-    async fn poll_all_repos(&self) {
+    /// Returns Err(()) if shutdown was requested during task execution (issue was moved back to open).
+    async fn poll_all_repos(&self) -> Result<(), ()> {
         if !self.in_flight.borrow().is_empty() {
-            return;
+            return Ok(());
         }
 
         let mut candidate: Option<(RepoConfig, Task)> = None;
@@ -134,14 +157,16 @@ impl Daemon {
                     repo = repo.name,
                     "dry-run: would dispatch task"
                 );
-            } else {
-                self.dispatch_task(&repo, &task).await;
+            } else if self.dispatch_task(&repo, &task).await.is_err() {
+                return Err(());
             }
         }
+        Ok(())
     }
 
     /// Dispatch a single task to the appropriate executor and wait for it to complete.
-    async fn dispatch_task(&self, repo: &RepoConfig, task: &Task) {
+    /// Returns Err(()) if shutdown was requested during execution (issue was moved back to open).
+    async fn dispatch_task(&self, repo: &RepoConfig, task: &Task) -> Result<(), ()> {
         let task_id = task.id.clone();
 
         self.in_flight.borrow_mut().insert(task_id.clone());
@@ -150,7 +175,8 @@ impl Daemon {
             Ok(p) => p,
             Err(e) => {
                 error!(repo = repo.name, error = %e, "failed to resolve repo path");
-                return;
+                self.in_flight.borrow_mut().remove(&task_id);
+                return Ok(());
             }
         };
 
@@ -170,7 +196,6 @@ impl Daemon {
             "dispatching task"
         );
 
-        // Resolve executor and run
         let executor = match resolve_executor(&repo.executor) {
             Ok(e) => e,
             Err(e) => {
@@ -179,11 +204,30 @@ impl Daemon {
                     error = %e,
                     "failed to resolve executor"
                 );
-                return;
+                if let Err(e) = self.work_db.set_open(&task.id, &repo_path) {
+                    error!(task_id = task.id, error = %e, "failed to move task back to open");
+                }
+                self.in_flight.borrow_mut().remove(&task_id);
+                return Ok(());
             }
         };
 
-        match executor.execute(task, &repo_path).await {
+        let pre_prompt = repo.pre_prompt.as_deref();
+        let run = executor.execute(task, &repo_path, pre_prompt);
+
+        let result = tokio::select! {
+            res = run => res,
+            _ = shutdown_signal() => {
+                info!(task_id = task.id, "shutdown during task, moving issue back to open");
+                if let Err(e) = self.work_db.set_open(&task.id, &repo_path) {
+                    error!(task_id = task.id, error = %e, "failed to move task back to open");
+                }
+                self.in_flight.borrow_mut().remove(&task_id);
+                return Err(());
+            }
+        };
+
+        match result {
             Ok(response) => {
                 info!(task_id = task.id, "task completed successfully");
                 if let Some(ref body) = response {
@@ -211,9 +255,17 @@ impl Daemon {
                     error = %e,
                     "task execution failed"
                 );
+                if let Err(e) = self.work_db.set_open(&task.id, &repo_path) {
+                    error!(
+                        task_id = task.id,
+                        error = %e,
+                        "failed to move task back to open"
+                    );
+                }
             }
         }
 
         self.in_flight.borrow_mut().remove(&task_id);
+        Ok(())
     }
 }

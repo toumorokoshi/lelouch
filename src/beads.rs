@@ -148,6 +148,12 @@ impl WorkDb for BeadsDb {
         Ok(())
     }
 
+    fn set_open(&self, task_id: &str, repo_path: &Path) -> Result<()> {
+        Self::run_bd(&["update", task_id, "--status", "open"], repo_path)?;
+        info!(task_id, "moved task back to open");
+        Ok(())
+    }
+
     fn create_deferred(&self, title: &str, defer_until: &str, repo_path: &Path) -> Result<Task> {
         let output = Self::run_bd(
             &[
