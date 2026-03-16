@@ -140,11 +140,7 @@ impl Executor for CursorAgentExecutor {
                 stderr = %accumulated.trim(),
                 "cursor-agent failed"
             );
-            anyhow::bail!(
-                "cursor-agent failed for task {} (exit {})",
-                task.id,
-                status
-            );
+            anyhow::bail!("cursor-agent failed for task {} (exit {})", task.id, status);
         }
 
         let response = Self::parse_json_result(accumulated.trim())?;

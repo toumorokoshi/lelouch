@@ -14,7 +14,8 @@ const STREAM_UPDATE_INTERVAL_SECS: u64 = 5;
 async fn shutdown_signal() {
     #[cfg(unix)]
     let sigterm = async {
-        if let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        if let Ok(mut sig) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         {
             sig.recv().await;
         } else {
@@ -39,7 +40,9 @@ async fn run_streaming_updater(
     accumulated_tx: oneshot::Sender<String>,
 ) {
     let mut accumulated = String::new();
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(STREAM_UPDATE_INTERVAL_SECS));
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(
+        STREAM_UPDATE_INTERVAL_SECS,
+    ));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
@@ -253,16 +256,17 @@ impl Daemon {
         };
 
         let pre_prompt = repo.pre_prompt.as_deref();
-        let comment_id_opt = match self
-            .work_db
-            .add_streaming_comment(&task.id, "Agent output:\n\n", &repo_path)
-        {
-            Ok(id) => id,
-            Err(e) => {
-                error!(task_id = task.id, error = %e, "failed to create streaming comment");
-                None
-            }
-        };
+        let comment_id_opt =
+            match self
+                .work_db
+                .add_streaming_comment(&task.id, "Agent output:\n\n", &repo_path)
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    error!(task_id = task.id, error = %e, "failed to create streaming comment");
+                    None
+                }
+            };
         let (output_tx, output_rx) = match &comment_id_opt {
             Some(_) => {
                 let (tx, rx) = mpsc::channel::<String>(256);
@@ -285,7 +289,12 @@ impl Daemon {
             let comment_id = comment_id.clone();
             let repo_path_buf = repo_path.to_path_buf();
             tokio::spawn(run_streaming_updater(
-                rx, work_db, task_id, comment_id, repo_path_buf, acc_tx,
+                rx,
+                work_db,
+                task_id,
+                comment_id,
+                repo_path_buf,
+                acc_tx,
             ));
         }
         let run = executor.execute(task, &repo_path, pre_prompt, output_tx);
@@ -326,10 +335,15 @@ impl Daemon {
 
         if let (Some(comment_id), Some(accumulated)) = (comment_id_opt.as_ref(), accumulated_opt) {
             let body = match &response {
-                Some(r) if !r.trim().is_empty() => format!("{}\n\n---\nResult:\n{}", accumulated, r),
+                Some(r) if !r.trim().is_empty() => {
+                    format!("{}\n\n---\nResult:\n{}", accumulated, r)
+                }
                 _ => accumulated,
             };
-            if let Err(e) = self.work_db.update_comment(&task.id, comment_id, &body, &repo_path) {
+            if let Err(e) = self
+                .work_db
+                .update_comment(&task.id, comment_id, &body, &repo_path)
+            {
                 error!(task_id = task.id, error = %e, "failed to update streaming comment");
             }
         } else if let Some(ref body) = response {

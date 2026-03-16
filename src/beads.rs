@@ -210,10 +210,7 @@ impl WorkDb for BeadsDb {
         body: &str,
         repo_path: &Path,
     ) -> Result<()> {
-        Self::run_bd(
-            &["update", task_id, "--notes", body],
-            repo_path,
-        )?;
+        Self::run_bd(&["update", task_id, "--notes", body], repo_path)?;
         info!(task_id, "updated issue notes (streaming output)");
         Ok(())
     }

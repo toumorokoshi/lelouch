@@ -112,11 +112,7 @@ impl Executor for AntigravityExecutor {
                 stderr = %accumulated.trim(),
                 "antigravity failed"
             );
-            anyhow::bail!(
-                "antigravity failed for task {} (exit {})",
-                task.id,
-                status
-            );
+            anyhow::bail!("antigravity failed for task {} (exit {})", task.id, status);
         }
 
         let response = if accumulated.trim().is_empty() {
