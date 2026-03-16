@@ -1,15 +1,20 @@
 use crate::work_db::Task;
 use anyhow::Result;
 use std::path::Path;
+use tokio::sync::mpsc;
 
 /// Result of executor run: optional response text to post as a comment on the issue.
 pub type ExecutionResponse = Option<String>;
 
+/// When present, the executor streams stdout/stderr to this sender (e.g. line by line).
+/// Dropping the sender signals end of stream.
+pub type OutputTx = Option<mpsc::Sender<String>>;
+
 /// Trait for executing tasks via a coding agent.
 ///
 /// Each executor implementation handles spawning the agent process,
-/// passing the task context, and reporting results. The returned response
-/// (if any) is posted as a comment on the work-db issue.
+/// passing the task context, and reporting results. When output_tx is Some,
+/// the executor streams process output to it; the daemon can update an issue comment periodically.
 #[async_trait::async_trait]
 pub trait Executor: Send + Sync {
     /// The name of this executor (e.g. "antigravity").
@@ -17,13 +22,13 @@ pub trait Executor: Send + Sync {
     fn name(&self) -> &str;
 
     /// Execute a task in the given repository directory.
-    /// pre_prompt, when present, is prepended to the task prompt for the executor.
-    /// Returns the response text to post as a comment on the issue, or None to skip.
+    /// If output_tx is Some, stream stdout/stderr to it (then drop the sender when done).
     async fn execute(
         &self,
         task: &Task,
         repo_path: &Path,
         pre_prompt: Option<&str>,
+        output_tx: OutputTx,
     ) -> Result<ExecutionResponse>;
 }
 

@@ -1,5 +1,6 @@
 use crate::work_db::{Task, WorkDb};
 use anyhow::{Context, Result};
+use chrono::Utc;
 use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info};
@@ -118,8 +119,13 @@ impl BeadsDb {
 
 impl WorkDb for BeadsDb {
     fn poll_ready(&self, repo_path: &Path) -> Result<Vec<Task>> {
-        let output = Self::run_bd(&["ready", "--json", "--limit", "0"], repo_path)?;
-        let tasks = Self::parse_tasks(&output)?;
+        let output = Self::run_bd(&["ready", "--include-deferred", "--json"], repo_path)?;
+        let all = Self::parse_tasks(&output)?;
+        let now = Utc::now();
+        let tasks: Vec<Task> = all
+            .into_iter()
+            .filter(|t| t.defer_until.map(|d| d <= now).unwrap_or(true))
+            .collect();
         info!(
             repo = %repo_path.display(),
             count = tasks.len(),
@@ -182,6 +188,33 @@ impl WorkDb for BeadsDb {
     fn add_comment(&self, task_id: &str, body: &str, repo_path: &Path) -> Result<()> {
         Self::run_bd(&["comments", "add", task_id, body], repo_path)?;
         info!(task_id, "added comment to issue");
+        Ok(())
+    }
+
+    /// Enables streaming by using the issue's notes field (`bd update --notes`).
+    /// Existing notes are overwritten with the streamed agent output.
+    fn add_streaming_comment(
+        &self,
+        task_id: &str,
+        _initial_body: &str,
+        _repo_path: &Path,
+    ) -> Result<Option<String>> {
+        Ok(Some(task_id.to_string()))
+    }
+
+    /// Writes body to the issue's notes via `bd update <task_id> --notes <body>`.
+    fn update_comment(
+        &self,
+        task_id: &str,
+        _comment_id: &str,
+        body: &str,
+        repo_path: &Path,
+    ) -> Result<()> {
+        Self::run_bd(
+            &["update", task_id, "--notes", body],
+            repo_path,
+        )?;
+        info!(task_id, "updated issue notes (streaming output)");
         Ok(())
     }
 

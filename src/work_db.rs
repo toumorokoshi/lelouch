@@ -45,8 +45,29 @@ pub trait WorkDb: Send + Sync {
     /// Create a new deferred task.
     fn create_deferred(&self, title: &str, defer_until: &str, repo_path: &Path) -> Result<Task>;
 
-    /// Add a comment to an issue (e.g. executor response).
+    /// Add a comment to an issue.
     fn add_comment(&self, task_id: &str, body: &str, repo_path: &Path) -> Result<()>;
+
+    /// Create a comment for streaming updates; only creates when the backend supports
+    /// update_comment. Returns the new comment's id when streaming is supported.
+    /// Default: no streaming (returns Ok(None)).
+    fn add_streaming_comment(
+        &self,
+        _task_id: &str,
+        _initial_body: &str,
+        _repo_path: &Path,
+    ) -> Result<Option<String>> {
+        Ok(None)
+    }
+
+    /// Update an existing comment's body (for streaming output).
+    fn update_comment(
+        &self,
+        task_id: &str,
+        comment_id: &str,
+        body: &str,
+        repo_path: &Path,
+    ) -> Result<()>;
 
     /// Mark a task as complete (e.g. after successful execution).
     fn set_complete(&self, task_id: &str, repo_path: &Path) -> Result<()>;

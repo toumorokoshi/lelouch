@@ -1,7 +1,8 @@
-use crate::executor::{ExecutionResponse, Executor};
+use crate::executor::{ExecutionResponse, Executor, OutputTx};
 use crate::work_db::Task;
 use anyhow::{Context, Result};
 use std::path::Path;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{error, info};
 
@@ -69,6 +70,7 @@ impl Executor for CursorAgentExecutor {
         task: &Task,
         repo_path: &Path,
         pre_prompt: Option<&str>,
+        output_tx: OutputTx,
     ) -> Result<ExecutionResponse> {
         let prompt = Self::build_prompt(task, pre_prompt);
 
@@ -79,7 +81,7 @@ impl Executor for CursorAgentExecutor {
             "dispatching task to cursor-agent"
         );
 
-        let output = Command::new("agent")
+        let mut child = Command::new("agent")
             .arg("-p")
             .arg("--output-format")
             .arg("json")
@@ -87,28 +89,65 @@ impl Executor for CursorAgentExecutor {
             .arg(repo_path)
             .arg("--force")
             .arg(&prompt)
-            .output()
-            .await
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .context("failed to spawn agent (Cursor Agent CLI)")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout_handle = child.stdout.take().context("missing stdout")?;
+        let stderr_handle = child.stderr.take().context("missing stderr")?;
+        let tx_stdout = output_tx.clone();
+        let tx_stderr = output_tx.clone();
+
+        let read_stdout = async {
+            let mut out = String::new();
+            let mut reader = BufReader::new(stdout_handle).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                out.push_str(&line);
+                out.push('\n');
+                if let Some(ref tx) = tx_stdout {
+                    let _ = tx.send(line).await;
+                }
+            }
+            out
+        };
+        let read_stderr = async {
+            let mut out = String::new();
+            let mut reader = BufReader::new(stderr_handle);
+            let mut line = String::new();
+            while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                out.push_str("[stderr] ");
+                out.push_str(&line);
+                if let Some(ref tx) = tx_stderr {
+                    let _ = tx.send(format!("[stderr] {}", line.trim_end())).await;
+                }
+                line.clear();
+            }
+            out
+        };
+
+        let (stdout_acc, stderr_acc) = tokio::join!(read_stdout, read_stderr);
+        let mut accumulated = stdout_acc;
+        accumulated.push_str(&stderr_acc);
+
+        let status = child.wait().await.context("waiting for agent")?;
+        drop(output_tx);
+
+        if !status.success() {
             error!(
                 task_id = task.id,
-                exit_code = ?output.status.code(),
-                stderr = %stderr.trim(),
+                exit_code = ?status.code(),
+                stderr = %accumulated.trim(),
                 "cursor-agent failed"
             );
             anyhow::bail!(
                 "cursor-agent failed for task {} (exit {})",
                 task.id,
-                output.status
+                status
             );
         }
 
-        let stdout =
-            String::from_utf8(output.stdout).context("agent output was not valid UTF-8")?;
-        let response = Self::parse_json_result(stdout.trim())?;
+        let response = Self::parse_json_result(accumulated.trim())?;
         info!(task_id = task.id, "cursor-agent completed successfully");
         Ok(response)
     }
