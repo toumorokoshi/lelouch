@@ -70,6 +70,7 @@ impl Executor for CursorAgentExecutor {
         task: &Task,
         repo_path: &Path,
         pre_prompt: Option<&str>,
+        model: Option<&str>,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse> {
         let prompt = Self::build_prompt(task, pre_prompt);
@@ -81,14 +82,19 @@ impl Executor for CursorAgentExecutor {
             "dispatching task to cursor-agent"
         );
 
-        let mut child = Command::new("agent")
-            .arg("-p")
+        let mut cmd = Command::new("agent");
+        cmd.arg("-p")
             .arg("--output-format")
             .arg("json")
             .arg("--workspace")
             .arg(repo_path)
             .arg("--force")
-            .arg(&prompt)
+            .arg(&prompt);
+        if let Some(m) = model {
+            cmd.arg("-m").arg(m);
+        }
+
+        let mut child = cmd
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()

@@ -31,7 +31,7 @@ pub enum Commands {
         #[arg(default_value = ".")]
         path: String,
 
-        /// Executor to use for this repository (e.g. "antigravity").
+        /// Executor to use for this repository (e.g. "gemini").
         #[arg(long)]
         executor: String,
 
@@ -42,6 +42,10 @@ pub enum Commands {
         /// Optional prompt fragment injected before the task prompt for the executor.
         #[arg(long)]
         pre_prompt: Option<String>,
+
+        /// Optional model to use for the executor (e.g. "gpt-4").
+        #[arg(long)]
+        model: Option<String>,
     },
 
     /// Queue management commands.

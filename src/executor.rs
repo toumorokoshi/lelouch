@@ -17,7 +17,7 @@ pub type OutputTx = Option<mpsc::Sender<String>>;
 /// the executor streams process output to it; the daemon can update an issue comment periodically.
 #[async_trait::async_trait]
 pub trait Executor: Send + Sync {
-    /// The name of this executor (e.g. "antigravity").
+    /// The name of this executor (e.g. "gemini").
     #[allow(dead_code)]
     fn name(&self) -> &str;
 
@@ -28,6 +28,7 @@ pub trait Executor: Send + Sync {
         task: &Task,
         repo_path: &Path,
         pre_prompt: Option<&str>,
+        model: Option<&str>,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse>;
 }
@@ -35,9 +36,7 @@ pub trait Executor: Send + Sync {
 /// Resolve an executor by name.
 pub fn resolve_executor(name: &str) -> Result<Box<dyn Executor>> {
     match name {
-        "antigravity" => Ok(Box::new(
-            crate::executors::antigravity::AntigravityExecutor::new(),
-        )),
+        "gemini" => Ok(Box::new(crate::executors::gemini::GeminiExecutor::new())),
         "cursor-agent" => Ok(Box::new(
             crate::executors::cursor_agent::CursorAgentExecutor::new(),
         )),

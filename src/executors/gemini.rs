@@ -6,13 +6,13 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{error, info};
 
-/// Executor that dispatches tasks to the antigravity agent.
+/// Executor that dispatches tasks to the gemini agent.
 ///
-/// Spawns `antigravity` as a subprocess with the task description
+/// Spawns `gemini` as a subprocess with the task description
 /// as a prompt, running in the repository directory.
-pub struct AntigravityExecutor;
+pub struct GeminiExecutor;
 
-impl AntigravityExecutor {
+impl GeminiExecutor {
     pub fn new() -> Self {
         Self
     }
@@ -36,9 +36,9 @@ impl AntigravityExecutor {
 }
 
 #[async_trait::async_trait]
-impl Executor for AntigravityExecutor {
+impl Executor for GeminiExecutor {
     fn name(&self) -> &str {
-        "antigravity"
+        "gemini"
     }
 
     async fn execute(
@@ -46,25 +46,30 @@ impl Executor for AntigravityExecutor {
         task: &Task,
         repo_path: &Path,
         pre_prompt: Option<&str>,
+        model: Option<&str>,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse> {
         let prompt = Self::build_prompt(task, pre_prompt);
 
         info!(
             task_id = task.id,
-            executor = "antigravity",
+            executor = "gemini",
             repo = %repo_path.display(),
-            "dispatching task to antigravity"
+            "dispatching task to gemini"
         );
 
-        let mut child = Command::new("antigravity")
-            .arg("--prompt")
-            .arg(&prompt)
+        let mut cmd = Command::new("gemini");
+        cmd.arg("--prompt").arg(&prompt).arg("--yolo");
+        if let Some(m) = model {
+            cmd.arg("-m").arg(m);
+        }
+
+        let mut child = cmd
             .current_dir(repo_path)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .context("failed to spawn antigravity")?;
+            .context("failed to spawn gemini")?;
 
         let stdout_handle = child.stdout.take().context("missing stdout")?;
         let stderr_handle = child.stderr.take().context("missing stderr")?;
@@ -102,7 +107,7 @@ impl Executor for AntigravityExecutor {
         let mut accumulated = stdout_acc;
         accumulated.push_str(&stderr_acc);
 
-        let status = child.wait().await.context("waiting for antigravity")?;
+        let status = child.wait().await.context("waiting for gemini")?;
         drop(output_tx);
 
         if !status.success() {
@@ -110,9 +115,9 @@ impl Executor for AntigravityExecutor {
                 task_id = task.id,
                 exit_code = ?status.code(),
                 stderr = %accumulated.trim(),
-                "antigravity failed"
+                "gemini failed"
             );
-            anyhow::bail!("antigravity failed for task {} (exit {})", task.id, status);
+            anyhow::bail!("gemini failed for task {} (exit {})", task.id, status);
         }
 
         let response = if accumulated.trim().is_empty() {
@@ -120,7 +125,7 @@ impl Executor for AntigravityExecutor {
         } else {
             Some(accumulated)
         };
-        info!(task_id = task.id, "antigravity completed successfully");
+        info!(task_id = task.id, "gemini completed successfully");
         Ok(response)
     }
 }

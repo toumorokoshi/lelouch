@@ -34,6 +34,7 @@ async fn main() -> Result<()> {
         executor,
         name,
         pre_prompt,
+        model,
     } = &cli.command
     {
         let abs_path = std::fs::canonicalize(path)
@@ -52,11 +53,15 @@ async fn main() -> Result<()> {
             &path_str,
             executor,
             pre_prompt.as_deref(),
+            model.as_deref(),
         )?;
         println!("Added repository '{repo_name}' ({path_str})");
         println!("  executor: {executor}");
         if pre_prompt.is_some() {
             println!("  pre_prompt: set");
+        }
+        if let Some(m) = model {
+            println!("  model: {m}");
         }
         println!("  config: {}", cfg_path.display());
         return Ok(());

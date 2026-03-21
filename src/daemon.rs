@@ -297,7 +297,8 @@ impl Daemon {
                 acc_tx,
             ));
         }
-        let run = executor.execute(task, &repo_path, pre_prompt, output_tx);
+        let model = repo.model.as_deref();
+        let run = executor.execute(task, &repo_path, pre_prompt, model, output_tx);
 
         let result = tokio::select! {
             res = run => res,
