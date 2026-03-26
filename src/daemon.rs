@@ -187,8 +187,16 @@ impl Daemon {
             };
             let in_flight = self.in_flight.borrow();
             if let Some(task) = tasks.into_iter().find(|t| !in_flight.contains(&t.id)) {
-                candidate = Some((repo.clone(), task));
-                break;
+                candidate = match candidate {
+                    Some((c_repo, c_task)) => {
+                        if task.priority < c_task.priority {
+                            Some((repo.clone(), task))
+                        } else {
+                            Some((c_repo, c_task))
+                        }
+                    }
+                    None => Some((repo.clone(), task)),
+                };
             }
         }
 

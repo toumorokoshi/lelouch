@@ -122,10 +122,11 @@ impl WorkDb for BeadsDb {
         let output = Self::run_bd(&["ready", "--include-deferred", "--json"], repo_path)?;
         let all = Self::parse_tasks(&output)?;
         let now = Utc::now();
-        let tasks: Vec<Task> = all
+        let mut tasks: Vec<Task> = all
             .into_iter()
             .filter(|t| t.defer_until.map(|d| d <= now).unwrap_or(true))
             .collect();
+        tasks.sort_by_key(|t| t.priority);
         info!(
             repo = %repo_path.display(),
             count = tasks.len(),
