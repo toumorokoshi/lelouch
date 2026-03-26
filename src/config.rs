@@ -62,8 +62,6 @@ pub fn config_path() -> Result<PathBuf> {
     Ok(proj_dirs.config_dir().join("config.toml"))
 }
 
-
-
 /// Load configuration from a specific path.
 pub fn load_config_from(path: &Path) -> Result<Config> {
     let contents = std::fs::read_to_string(path)
