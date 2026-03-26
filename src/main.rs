@@ -68,21 +68,22 @@ async fn main() -> Result<()> {
     }
 
     // Load config
-    let cfg = if let Some(ref path) = cli.config {
-        config::load_config_from(std::path::Path::new(path))?
+    let cfg_path = if let Some(ref path) = cli.config {
+        std::path::PathBuf::from(path)
     } else {
-        config::load_config().context(
-            "failed to load config; run `lelouch init` first or pass --config. \
+        config::config_path().context(
+            "failed to find config; run `lelouch init` first or pass --config. \
              See `lelouch --help` for config location.",
         )?
     };
+    let cfg = config::load_config_from(&cfg_path)?;
 
     let work_db: Arc<dyn work_db::WorkDb> = Arc::new(beads::BeadsDb::new());
 
     match cli.command {
         Commands::Init { .. } => unreachable!(),
         Commands::Run { dry_run } => {
-            let daemon = daemon::Daemon::new(cfg.repositories.clone(), work_db, dry_run);
+            let daemon = daemon::Daemon::new(cfg_path, work_db, dry_run);
             daemon.run().await?;
         }
         Commands::Queue { command } => match command {

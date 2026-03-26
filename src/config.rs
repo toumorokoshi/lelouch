@@ -19,7 +19,7 @@ pub struct Config {
 }
 
 /// Configuration for a single repository that lelouch manages.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct RepoConfig {
     /// Human-readable name for this repository.
     pub name: String,
@@ -62,11 +62,7 @@ pub fn config_path() -> Result<PathBuf> {
     Ok(proj_dirs.config_dir().join("config.toml"))
 }
 
-/// Load configuration from the default config path.
-pub fn load_config() -> Result<Config> {
-    let path = config_path()?;
-    load_config_from(&path)
-}
+
 
 /// Load configuration from a specific path.
 pub fn load_config_from(path: &Path) -> Result<Config> {
