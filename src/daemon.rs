@@ -7,6 +7,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{error, info};
 
+type SharedState = Arc<Mutex<HashMap<String, Option<Task>>>>;
+
 const STREAM_UPDATE_INTERVAL_SECS: u64 = 5;
 
 /// Future that completes when a shutdown signal (SIGINT or SIGTERM) is received.
@@ -94,6 +96,9 @@ impl Daemon {
         let mut workers: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
         let mut last_modified = std::time::SystemTime::UNIX_EPOCH;
 
+        let states: SharedState = Arc::new(Mutex::new(HashMap::new()));
+        let (notify_tx, mut notify_rx) = mpsc::channel::<()>(100);
+
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
 
         loop {
@@ -122,6 +127,8 @@ impl Daemon {
                                             if should_stop {
                                                 if let Some(handle) = workers.remove(name) {
                                                     info!(repo = %name, "stopping worker for repository");
+                                                    states.lock().await.remove(name);
+                                                    let _ = notify_tx.try_send(());
                                                     handle.abort();
                                                 }
                                             }
@@ -131,6 +138,8 @@ impl Daemon {
                                         for (name, new_repo) in new_repos.iter() {
                                             if !workers.contains_key(name) {
                                                 info!(repo = %name, "starting worker for repository");
+                                                states.lock().await.insert(name.clone(), None);
+                                                let _ = notify_tx.try_send(());
                                                 // Quick startup scan
                                                 if let Ok(repo_path) = new_repo.resolved_path() {
                                                     if let Err(e) = self.work_db.full_scan(&repo_path) {
@@ -141,6 +150,8 @@ impl Daemon {
                                                     new_repo.clone(),
                                                     Arc::clone(&self.work_db),
                                                     self.dry_run,
+                                                    Arc::clone(&states),
+                                                    notify_tx.clone(),
                                                 ));
                                                 workers.insert(name.clone(), handle);
                                             }
@@ -156,6 +167,9 @@ impl Daemon {
                         }
                     }
                 }
+                Some(_) = notify_rx.recv() => {
+                    print_status_table(&states).await;
+                }
                 _ = shutdown_signal() => {
                     info!("received shutdown signal, exiting");
                     break;
@@ -166,7 +180,13 @@ impl Daemon {
     }
 }
 
-async fn run_worker(repo: RepoConfig, work_db: Arc<dyn WorkDb>, dry_run: bool) {
+async fn run_worker(
+    repo: RepoConfig,
+    work_db: Arc<dyn WorkDb>,
+    dry_run: bool,
+    states: SharedState,
+    notify_tx: mpsc::Sender<()>,
+) {
     let mut interval =
         tokio::time::interval(tokio::time::Duration::from_secs(repo.poll_interval_secs));
     let in_flight = Arc::new(Mutex::new(HashSet::new()));
@@ -176,7 +196,7 @@ async fn run_worker(repo: RepoConfig, work_db: Arc<dyn WorkDb>, dry_run: bool) {
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                if let Err(()) = process_ready_tasks(&repo, &work_db, dry_run, &in_flight).await {
+                if let Err(()) = process_ready_tasks(&repo, &work_db, dry_run, &in_flight, &states, &notify_tx).await {
                     break;
                 }
             }
@@ -193,6 +213,8 @@ async fn process_ready_tasks(
     work_db: &Arc<dyn WorkDb>,
     dry_run: bool,
     in_flight: &Arc<Mutex<HashSet<String>>>,
+    states: &SharedState,
+    notify_tx: &mpsc::Sender<()>,
 ) -> Result<(), ()> {
     let repo_path = match repo.resolved_path() {
         Ok(p) => p,
@@ -227,10 +249,18 @@ async fn process_ready_tasks(
             in_flight_guard.insert(task_id.clone());
             drop(in_flight_guard);
 
-            if dispatch_task(repo, &task, work_db, in_flight)
+            states
+                .lock()
                 .await
-                .is_err()
-            {
+                .insert(repo.name.clone(), Some(task.clone()));
+            let _ = notify_tx.try_send(());
+
+            let res = dispatch_task(repo, &task, work_db, in_flight).await;
+
+            states.lock().await.insert(repo.name.clone(), None);
+            let _ = notify_tx.try_send(());
+
+            if res.is_err() {
                 return Err(());
             }
         }
@@ -396,4 +426,50 @@ async fn dispatch_task(
 
     in_flight.lock().await.remove(&task_id);
     Ok(())
+}
+
+async fn print_status_table(states: &SharedState) {
+    let states = states.lock().await;
+    if !states.is_empty() {
+        use std::fmt::Write;
+        let mut table = String::new();
+        let _ = writeln!(
+            &mut table,
+            "\n{:<20} | {:<10} | {}",
+            "Repository", "Status", "Issue"
+        );
+        let _ = writeln!(&mut table, "{:-<20}-+-{:-<10}-+-{:-<50}", "", "", "");
+
+        let mut repos: Vec<_> = states.keys().cloned().collect();
+        repos.sort();
+
+        for repo_name in repos {
+            let task_opt = states.get(&repo_name).unwrap();
+            let trunc_repo = if repo_name.len() > 20 {
+                format!("{}...", &repo_name[..17])
+            } else {
+                repo_name.clone()
+            };
+
+            match task_opt {
+                Some(task) => {
+                    let issue_str = format!("{} {}", task.id, task.title);
+                    let trunc_issue = if issue_str.len() > 47 {
+                        format!("{}...", &issue_str[..44])
+                    } else {
+                        issue_str
+                    };
+                    let _ = writeln!(
+                        &mut table,
+                        "{:<20} | {:<10} | {}",
+                        trunc_repo, "Executing", trunc_issue
+                    );
+                }
+                None => {
+                    let _ = writeln!(&mut table, "{:<20} | {:<10} | {}", trunc_repo, "Idle", "-");
+                }
+            }
+        }
+        info!("{}", table);
+    }
 }
