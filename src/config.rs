@@ -36,10 +36,20 @@ pub struct RepoConfig {
     /// Optional model to use for the executor (e.g. "gpt-4" or "gemini-1.5-pro").
     #[serde(default)]
     pub model: Option<String>,
+    /// Maximum number of concurrent workers (worktrees) for this repository.
+    #[serde(default = "default_max_worker_count")]
+    pub max_worker_count: usize,
+    /// Path to the custom Dockerfile, if any.
+    #[serde(default)]
+    pub dockerfile: Option<String>,
 }
 
 fn default_poll_interval() -> u64 {
     60
+}
+
+fn default_max_worker_count() -> usize {
+    1
 }
 
 impl RepoConfig {
@@ -73,6 +83,7 @@ pub fn load_config_from(path: &Path) -> Result<Config> {
 
 /// Add a repository to the config file, creating it if it doesn't exist.
 /// Returns the resolved config path used.
+#[allow(clippy::too_many_arguments)]
 pub fn add_repo(
     config_override: Option<&str>,
     name: &str,
@@ -80,6 +91,8 @@ pub fn add_repo(
     executor: &str,
     pre_prompt: Option<&str>,
     model: Option<&str>,
+    max_worker_count: Option<usize>,
+    dockerfile: Option<&str>,
 ) -> Result<PathBuf> {
     let cfg_path = match config_override {
         Some(p) => PathBuf::from(p),
@@ -107,6 +120,8 @@ pub fn add_repo(
         poll_interval_secs: default_poll_interval(),
         pre_prompt: pre_prompt.map(String::from),
         model: model.map(String::from),
+        max_worker_count: max_worker_count.unwrap_or_else(default_max_worker_count),
+        dockerfile: dockerfile.map(String::from),
     });
 
     // Ensure parent directory exists
@@ -151,6 +166,8 @@ poll_interval_secs = 120
         assert_eq!(config.repositories[0].poll_interval_secs, 60);
         assert_eq!(config.repositories[0].pre_prompt, None);
         assert_eq!(config.repositories[0].model, None);
+        assert_eq!(config.repositories[0].max_worker_count, 1);
+        assert_eq!(config.repositories[0].dockerfile, None);
         assert_eq!(config.repositories[1].poll_interval_secs, 120);
 
         let with_pre = r#"
@@ -160,6 +177,8 @@ path = "~/git/proj"
 executor = "cursor-agent"
 pre_prompt = "Always write tests first."
 model = "gpt-4"
+max_worker_count = 3
+dockerfile = "Dockerfile.custom"
 "#;
         let config: Config = toml::from_str(with_pre).unwrap();
         assert_eq!(
@@ -167,5 +186,10 @@ model = "gpt-4"
             Some("Always write tests first.")
         );
         assert_eq!(config.repositories[0].model.as_deref(), Some("gpt-4"));
+        assert_eq!(config.repositories[0].max_worker_count, 3);
+        assert_eq!(
+            config.repositories[0].dockerfile.as_deref(),
+            Some("Dockerfile.custom")
+        );
     }
 }

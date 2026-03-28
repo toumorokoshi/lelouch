@@ -1,3 +1,4 @@
+use crate::config::RepoConfig;
 use crate::work_db::Task;
 use anyhow::Result;
 use std::path::Path;
@@ -26,9 +27,8 @@ pub trait Executor: Send + Sync {
     async fn execute(
         &self,
         task: &Task,
-        repo_path: &Path,
-        pre_prompt: Option<&str>,
-        model: Option<&str>,
+        worktree_path: &Path,
+        repo: &RepoConfig,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse>;
 }

@@ -1,29 +1,24 @@
-# Example Workflow with Git Worktrees
+# Dyanmic Worker Workflow
 
 ## Use Case
 
-This workflow works well for the user where they have some deferred execution
-tasks they want to execute in a workflow. For example, waiting half an hour for
-CI to complete before running the next stage.
+This workflow works well for users who have deferred execution tasks they want to execute in a seamless workflow. For example, waiting half an hour for CI to complete before running the next stage.
 
 ## Requirements
 
 - lelouch (this project)
 - beads (https://github.com/steveyegge/beads)
+- Docker (for launching executors in isolated containers)
 
 ## Concept
 
 The high-level idea is:
 
 1. You keep your primary interactive repository intact.
-2. You create one or more [Git Worktrees](https://git-scm.com/docs/git-worktree)
-   which can be used by your agents.
-3. In the primary repo, initialize your beads database.
-4. In the worktrees, you also initialize your beads database, with the same worktree.
-5. Initialize lelouch in each repository (which will allow lelouch to track each job in it's own task)
-6. start lelouch
-7. enqueue work as you see fit via beads or lelouch.
-8. your agents will also enqueue new work into beads or lelouch as needed.
+2. `lelouch` actively orchestrates one or more dynamic [Git Worktrees](https://git-scm.com/docs/git-worktree) which are used by your agents.
+3. In the primary repo, you initialize your beads database and define the max worker count for `lelouch`.
+4. Start `lelouch` in daemon mode.
+5. Enqueue work as you see fit via beads or lelouch. `lelouch` will automatically assign tasks to isolated Docker containers running mapped worktrees from `~/.lelouch/worktrees`.
 
 As a visual, it looks like:
 
@@ -33,9 +28,10 @@ flowchart LR
         P_B[beads DB]
     end
 
-    W1_L[Worktree 1 + lelouch task]
-    W2_L[Worktree 2 + lelouch task]
-
+    subgraph dynamic_workers["~/.lelouch/worktrees/"]
+        W1_L[Dynamic Worktree 1 in Docker]
+        W2_L[Dynamic Worktree 2 in Docker]
+    end
 
     you[You] -->|enqueue| P_B
 
@@ -46,27 +42,24 @@ flowchart LR
     P_B -->|consumes| W2_L
 ```
 
-
-
 ## Setup
 
-1. Create one or more worktrees with `git worktree add {repo}`:
-
-```
-git worktree add ../repo-for-agent
-```
-
-2. Initialize your database (I like to use stealth mode):
+1. Initialize your database in your primary repo (stealth mode is recommended):
 
 ```
 bd init --stealth
 ```
 
-3. In each *worktree*, initialize lelouch:
+2. Initialize lelouch in your primary repo, configuring the number of maximum workers:
 
-**note** add a pre-prompt to ensure that the agent will reset your environment to your desired state before picking up the next task.
+**note** you can add an optional pre-prompt and custom dockerfile flag if necessary.
 
 ```
-cd ../repo-for-agent
-lelouch init . --executor=cursor-agent --pre-prompt="run `git checkout -B repo-for-agent origin/develop` before running the task"
+lelouch init . --executor=cursor-agent --max-workers=2
+```
+
+3. Start the daemon which will provision the worktrees and automatically dispatch tasks using Docker containers for isolation:
+
+```
+lelouch run
 ```

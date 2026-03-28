@@ -187,16 +187,49 @@ async fn run_worker(
     states: SharedState,
     notify_tx: mpsc::Sender<()>,
 ) {
+    let repo_path = match repo.resolved_path() {
+        Ok(p) => p,
+        Err(e) => {
+            error!(repo = %repo.name, error = %e, "failed to resolve repo path");
+            return;
+        }
+    };
+
+    let wt_manager = Arc::new(crate::worktree::WorktreeManager::new(
+        repo.name.clone(),
+        repo_path.clone(),
+        repo.max_worker_count,
+        Box::new(crate::vcs::git::GitVcs),
+    ));
+
+    if let Err(e) = wt_manager.sync_worktrees() {
+        error!(repo = %repo.name, error = %e, "failed to sync worktrees");
+        return;
+    }
+
     let mut interval =
         tokio::time::interval(tokio::time::Duration::from_secs(repo.poll_interval_secs));
     let in_flight = Arc::new(Mutex::new(HashSet::new()));
+    let available_worktrees = Arc::new(Mutex::new(
+        (0..repo.max_worker_count).collect::<Vec<usize>>(),
+    ));
 
-    info!(repo = %repo.name, interval = repo.poll_interval_secs, "worker started");
+    info!(repo = %repo.name, interval = repo.poll_interval_secs, workers = repo.max_worker_count, "worker started");
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                if let Err(()) = process_ready_tasks(&repo, &work_db, dry_run, &in_flight, &states, &notify_tx).await {
+                if let Err(()) = process_ready_tasks(
+                    &repo,
+                    &repo_path,
+                    &wt_manager,
+                    &work_db,
+                    dry_run,
+                    &in_flight,
+                    &available_worktrees,
+                    &states,
+                    &notify_tx,
+                ).await {
                     break;
                 }
             }
@@ -208,23 +241,19 @@ async fn run_worker(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_ready_tasks(
     repo: &RepoConfig,
+    repo_path: &std::path::Path,
+    wt_manager: &Arc<crate::worktree::WorktreeManager>,
     work_db: &Arc<dyn WorkDb>,
     dry_run: bool,
     in_flight: &Arc<Mutex<HashSet<String>>>,
+    available_worktrees: &Arc<Mutex<Vec<usize>>>,
     states: &SharedState,
     notify_tx: &mpsc::Sender<()>,
 ) -> Result<(), ()> {
-    let repo_path = match repo.resolved_path() {
-        Ok(p) => p,
-        Err(e) => {
-            error!(repo = %repo.name, error = %e, "failed to resolve repo path");
-            return Ok(());
-        }
-    };
-
-    let tasks = match work_db.poll_ready(&repo_path) {
+    let tasks = match work_db.poll_ready(repo_path) {
         Ok(t) => t,
         Err(e) => {
             error!(repo = %repo.name, error = %e, "error polling repo");
@@ -233,38 +262,69 @@ async fn process_ready_tasks(
     };
 
     let mut in_flight_guard = in_flight.lock().await;
-    let candidate = tasks.into_iter().find(|t| !in_flight_guard.contains(&t.id));
+    let mut available_guard = available_worktrees.lock().await;
 
-    if let Some(task) = candidate {
-        if dry_run {
-            info!(
-                task_id = %task.id,
-                title = %task.title,
-                repo = %repo.name,
-                "dry-run: would dispatch task"
-            );
-        } else {
-            // Drop guard before awaiting dispatch_task
-            let task_id = task.id.clone();
-            in_flight_guard.insert(task_id.clone());
-            drop(in_flight_guard);
+    for task in tasks {
+        if in_flight_guard.contains(&task.id) {
+            continue;
+        }
 
-            states
-                .lock()
-                .await
-                .insert(repo.name.clone(), Some(task.clone()));
-            let _ = notify_tx.try_send(());
+        if let Some(wt_index) = available_guard.pop() {
+            if dry_run {
+                info!(
+                    task_id = %task.id,
+                    title = %task.title,
+                    repo = %repo.name,
+                    wt_index = wt_index,
+                    "dry-run: would dispatch task"
+                );
+                available_guard.push(wt_index);
+            } else {
+                let task_id = task.id.clone();
+                in_flight_guard.insert(task_id.clone());
 
-            let res = dispatch_task(repo, &task, work_db, in_flight).await;
+                states
+                    .lock()
+                    .await
+                    .insert(format!("{}-{}", repo.name, wt_index), Some(task.clone()));
+                let _ = notify_tx.try_send(());
 
-            states.lock().await.insert(repo.name.clone(), None);
-            let _ = notify_tx.try_send(());
+                let repo_clone = repo.clone();
+                let task_clone = task.clone();
+                let work_db_clone = Arc::clone(work_db);
+                let in_flight_clone = Arc::clone(in_flight);
+                let available_clone = Arc::clone(available_worktrees);
+                let states_clone = Arc::clone(states);
+                let notify_tx_clone = notify_tx.clone();
+                let wt_manager_clone = Arc::clone(wt_manager);
+                let repo_path_clone = repo_path.to_path_buf();
 
-            if res.is_err() {
-                return Err(());
+                tokio::spawn(async move {
+                    let _ = dispatch_task(
+                        &repo_clone,
+                        &repo_path_clone,
+                        &task_clone,
+                        &work_db_clone,
+                        &in_flight_clone,
+                        wt_index,
+                        &wt_manager_clone,
+                    )
+                    .await;
+
+                    available_clone.lock().await.push(wt_index);
+                    states_clone
+                        .lock()
+                        .await
+                        .insert(format!("{}-{}", repo_clone.name, wt_index), None);
+                    let _ = notify_tx_clone.try_send(());
+                });
             }
+        } else {
+            // No more available worktrees, break out of loop to wait for next tick or completion
+            break;
         }
     }
+
     Ok(())
 }
 
@@ -272,22 +332,25 @@ async fn process_ready_tasks(
 /// Returns Err(()) if shutdown was requested during execution (issue was moved back to open).
 async fn dispatch_task(
     repo: &RepoConfig,
+    repo_path: &std::path::Path,
     task: &Task,
     work_db: &Arc<dyn WorkDb>,
     in_flight: &Arc<Mutex<HashSet<String>>>,
+    wt_index: usize,
+    wt_manager: &Arc<crate::worktree::WorktreeManager>,
 ) -> Result<(), ()> {
     let task_id = task.id.clone();
 
-    let repo_path = match repo.resolved_path() {
+    let worktree_path = match wt_manager.worktree_path(wt_index) {
         Ok(p) => p,
         Err(e) => {
-            error!(repo = %repo.name, error = %e, "failed to resolve repo path");
+            error!(repo = %repo.name, error = %e, wt_index = wt_index, "failed to get worktree path");
             in_flight.lock().await.remove(&task_id);
             return Ok(());
         }
     };
 
-    if let Err(e) = work_db.set_in_progress(&task.id, &repo_path) {
+    if let Err(e) = work_db.set_in_progress(&task.id, repo_path) {
         error!(
             task_id = %task.id,
             error = %e,
@@ -300,6 +363,7 @@ async fn dispatch_task(
         title = %task.title,
         repo = %repo.name,
         executor = %repo.executor,
+        wt_index = wt_index,
         "dispatching task"
     );
 
@@ -311,7 +375,7 @@ async fn dispatch_task(
                 error = %e,
                 "failed to resolve executor"
             );
-            if let Err(e) = work_db.set_open(&task.id, &repo_path) {
+            if let Err(e) = work_db.set_open(&task.id, repo_path) {
                 error!(task_id = %task.id, error = %e, "failed to move task back to open");
             }
             in_flight.lock().await.remove(&task_id);
@@ -319,9 +383,8 @@ async fn dispatch_task(
         }
     };
 
-    let pre_prompt = repo.pre_prompt.as_deref();
     let comment_id_opt =
-        match work_db.add_streaming_comment(&task.id, "Agent output:\n\n", &repo_path) {
+        match work_db.add_streaming_comment(&task.id, "Agent output:\n\n", repo_path) {
             Ok(id) => id,
             Err(e) => {
                 error!(task_id = %task.id, error = %e, "failed to create streaming comment");
@@ -357,14 +420,13 @@ async fn dispatch_task(
         ));
     }
 
-    let model = repo.model.as_deref();
-    let run = executor.execute(task, &repo_path, pre_prompt, model, output_tx);
+    let run = executor.execute(task, &worktree_path, repo, output_tx);
 
     let result = tokio::select! {
         res = run => res,
         _ = shutdown_signal() => {
             info!(task_id = %task.id, "shutdown during task, moving issue back to open");
-            if let Err(e) = work_db.set_open(&task.id, &repo_path) {
+            if let Err(e) = work_db.set_open(&task.id, repo_path) {
                 error!(task_id = %task.id, error = %e, "failed to move task back to open");
             }
             in_flight.lock().await.remove(&task_id);
@@ -376,7 +438,7 @@ async fn dispatch_task(
         Ok(r) => r,
         Err(e) => {
             error!(task_id = %task.id, error = %e, "task execution failed");
-            if let Err(e) = work_db.set_open(&task.id, &repo_path) {
+            if let Err(e) = work_db.set_open(&task.id, repo_path) {
                 error!(
                     task_id = %task.id,
                     error = %e,
@@ -401,12 +463,12 @@ async fn dispatch_task(
             }
             _ => accumulated,
         };
-        if let Err(e) = work_db.update_comment(&task.id, comment_id, &body, &repo_path) {
+        if let Err(e) = work_db.update_comment(&task.id, comment_id, &body, repo_path) {
             error!(task_id = %task.id, error = %e, "failed to update streaming comment");
         }
     } else if let Some(ref body) = response {
         if !body.trim().is_empty() {
-            if let Err(e) = work_db.add_comment(&task.id, body, &repo_path) {
+            if let Err(e) = work_db.add_comment(&task.id, body, repo_path) {
                 error!(
                     task_id = %task.id,
                     error = %e,
@@ -416,7 +478,7 @@ async fn dispatch_task(
         }
     }
 
-    if let Err(e) = work_db.set_complete(&task.id, &repo_path) {
+    if let Err(e) = work_db.set_complete(&task.id, repo_path) {
         error!(
             task_id = %task.id,
             error = %e,
@@ -435,8 +497,8 @@ async fn print_status_table(states: &SharedState) {
         let mut table = String::new();
         let _ = writeln!(
             &mut table,
-            "\n{:<20} | {:<10} | {}",
-            "Repository", "Status", "Issue"
+            "\n{:<20} | {:<10} | Issue",
+            "Repository", "Status"
         );
         let _ = writeln!(&mut table, "{:-<20}-+-{:-<10}-+-{:-<50}", "", "", "");
 
@@ -466,7 +528,7 @@ async fn print_status_table(states: &SharedState) {
                     );
                 }
                 None => {
-                    let _ = writeln!(&mut table, "{:<20} | {:<10} | {}", trunc_repo, "Idle", "-");
+                    let _ = writeln!(&mut table, "{:<20} | {:<10} | -", trunc_repo, "Idle");
                 }
             }
         }

@@ -51,29 +51,61 @@ impl Executor for CursorAgentExecutor {
     async fn execute(
         &self,
         task: &Task,
-        repo_path: &Path,
-        pre_prompt: Option<&str>,
-        model: Option<&str>,
+        worktree_path: &Path,
+        repo: &crate::config::RepoConfig,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse> {
-        let prompt = crate::executor::build_prompt(task, pre_prompt);
+        let prompt = crate::executor::build_prompt(task, repo.pre_prompt.as_deref());
 
         info!(
             task_id = task.id,
             executor = "cursor-agent",
-            repo = %repo_path.display(),
-            "dispatching task to cursor-agent"
+            repo = %repo.name,
+            worktree = %worktree_path.display(),
+            "dispatching task to cursor-agent via docker"
         );
 
-        let mut cmd = Command::new("agent");
+        let dockerfile = repo.dockerfile.as_deref().unwrap_or("Dockerfile");
+        let image_name = format!("lelouch-{}-cursor-agent", repo.name.to_lowercase());
+
+        let build_status = Command::new("docker")
+            .arg("build")
+            .arg("-t")
+            .arg(&image_name)
+            .arg("-f")
+            .arg(worktree_path.join(dockerfile))
+            .arg(worktree_path)
+            .status()
+            .await
+            .context("failed to execute docker build")?;
+
+        if !build_status.success() {
+            anyhow::bail!("docker build failed with exit code: {}", build_status);
+        }
+
+        let mut cmd = Command::new("docker");
+        cmd.arg("run").arg("--rm");
+
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let cursor_dir = base_dirs.home_dir().join(".cursor");
+            cmd.arg("-v")
+                .arg(format!("{}:/root/.cursor", cursor_dir.display()));
+        }
+
+        cmd.arg("-v")
+            .arg(format!("{}:/workspace", worktree_path.display()));
+        cmd.arg("-w").arg("/workspace");
+        cmd.arg(&image_name);
+
+        cmd.arg("agent");
         cmd.arg("-p")
             .arg("--output-format")
             .arg("json")
             .arg("--workspace")
-            .arg(repo_path)
+            .arg("/workspace")
             .arg("--force")
             .arg(&prompt);
-        if let Some(m) = model {
+        if let Some(m) = &repo.model {
             cmd.arg("-m").arg(m);
         }
 

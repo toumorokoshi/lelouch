@@ -46,6 +46,14 @@ pub enum Commands {
         /// Optional model to use for the executor (e.g. "gpt-4").
         #[arg(long)]
         model: Option<String>,
+
+        /// Maximum number of workers to use for this repository.
+        #[arg(long)]
+        max_workers: Option<usize>,
+
+        /// Optional path to a custom Dockerfile.
+        #[arg(long)]
+        dockerfile: Option<String>,
     },
 
     /// Queue management commands.

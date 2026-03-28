@@ -27,28 +27,58 @@ impl Executor for GeminiExecutor {
     async fn execute(
         &self,
         task: &Task,
-        repo_path: &Path,
-        pre_prompt: Option<&str>,
-        model: Option<&str>,
+        worktree_path: &Path,
+        repo: &crate::config::RepoConfig,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse> {
-        let prompt = crate::executor::build_prompt(task, pre_prompt);
+        let prompt = crate::executor::build_prompt(task, repo.pre_prompt.as_deref());
 
         info!(
             task_id = task.id,
             executor = "gemini",
-            repo = %repo_path.display(),
-            "dispatching task to gemini"
+            repo = %repo.name,
+            worktree = %worktree_path.display(),
+            "dispatching task to gemini via docker"
         );
 
-        let mut cmd = Command::new("gemini");
-        cmd.arg("--prompt").arg(&prompt).arg("--yolo");
-        if let Some(m) = model {
+        let dockerfile = repo.dockerfile.as_deref().unwrap_or("Dockerfile");
+        let image_name = format!("lelouch-{}-gemini", repo.name.to_lowercase());
+
+        let build_status = Command::new("docker")
+            .arg("build")
+            .arg("-t")
+            .arg(&image_name)
+            .arg("-f")
+            .arg(worktree_path.join(dockerfile))
+            .arg(worktree_path)
+            .status()
+            .await
+            .context("failed to execute docker build")?;
+
+        if !build_status.success() {
+            anyhow::bail!("docker build failed with exit code: {}", build_status);
+        }
+
+        let mut cmd = Command::new("docker");
+        cmd.arg("run").arg("--rm");
+
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let gemini_dir = base_dirs.home_dir().join(".gemini");
+            cmd.arg("-v")
+                .arg(format!("{}:/root/.gemini", gemini_dir.display()));
+        }
+
+        cmd.arg("-v")
+            .arg(format!("{}:/workspace", worktree_path.display()));
+        cmd.arg("-w").arg("/workspace");
+        cmd.arg(&image_name);
+
+        cmd.arg("gemini").arg("--prompt").arg(&prompt).arg("--yolo");
+        if let Some(m) = &repo.model {
             cmd.arg("-m").arg(m);
         }
 
         let mut child = cmd
-            .current_dir(repo_path)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()

@@ -4,7 +4,9 @@ mod config;
 mod daemon;
 mod executor;
 mod executors;
+mod vcs;
 mod work_db;
+mod worktree;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -35,6 +37,8 @@ async fn main() -> Result<()> {
         name,
         pre_prompt,
         model,
+        max_workers,
+        dockerfile,
     } = &cli.command
     {
         let abs_path = std::fs::canonicalize(path)
@@ -54,6 +58,8 @@ async fn main() -> Result<()> {
             executor,
             pre_prompt.as_deref(),
             model.as_deref(),
+            *max_workers,
+            dockerfile.as_deref(),
         )?;
         println!("Added repository '{repo_name}' ({path_str})");
         println!("  executor: {executor}");
@@ -62,6 +68,12 @@ async fn main() -> Result<()> {
         }
         if let Some(m) = model {
             println!("  model: {m}");
+        }
+        if let Some(mw) = max_workers {
+            println!("  max workers: {mw}");
+        }
+        if let Some(df) = dockerfile {
+            println!("  dockerfile: {df}");
         }
         println!("  config: {}", cfg_path.display());
         return Ok(());
