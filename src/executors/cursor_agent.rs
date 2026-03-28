@@ -40,23 +40,6 @@ impl CursorAgentExecutor {
         }
         anyhow::bail!("no valid result object in agent JSON output")
     }
-
-    fn build_prompt(task: &Task, pre_prompt: Option<&str>) -> String {
-        let mut parts = Vec::new();
-        if let Some(pre) = pre_prompt {
-            if !pre.trim().is_empty() {
-                parts.push(pre.trim().to_string());
-            }
-        }
-        let mut task_prompt = format!("Work on issue {}: {}", task.id, task.title);
-        if let Some(ref desc) = task.description {
-            if !desc.is_empty() {
-                task_prompt.push_str(&format!("\n\nDescription:\n{desc}"));
-            }
-        }
-        parts.push(task_prompt);
-        parts.join("\n\n")
-    }
 }
 
 #[async_trait::async_trait]
@@ -73,7 +56,7 @@ impl Executor for CursorAgentExecutor {
         model: Option<&str>,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse> {
-        let prompt = Self::build_prompt(task, pre_prompt);
+        let prompt = crate::executor::build_prompt(task, pre_prompt);
 
         info!(
             task_id = task.id,

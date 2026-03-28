@@ -33,6 +33,24 @@ pub trait Executor: Send + Sync {
     ) -> Result<ExecutionResponse>;
 }
 
+/// Construct the task prompt string, optionally prepending a pre-prompt.
+pub fn build_prompt(task: &Task, pre_prompt: Option<&str>) -> String {
+    let mut parts = Vec::new();
+    if let Some(pre) = pre_prompt {
+        if !pre.trim().is_empty() {
+            parts.push(pre.trim().to_string());
+        }
+    }
+    let mut task_prompt = format!("Work on issue {}: {}", task.id, task.title);
+    if let Some(ref desc) = task.description {
+        if !desc.is_empty() {
+            task_prompt.push_str(&format!("\n\nDescription:\n{desc}"));
+        }
+    }
+    parts.push(task_prompt);
+    parts.join("\n\n")
+}
+
 /// Resolve an executor by name.
 pub fn resolve_executor(name: &str) -> Result<Box<dyn Executor>> {
     match name {
