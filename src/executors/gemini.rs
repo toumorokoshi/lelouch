@@ -27,6 +27,7 @@ impl Executor for GeminiExecutor {
         task: &Task,
         worktree_path: &Path,
         repo: &crate::config::RepoConfig,
+        vcs: &dyn crate::vcs::Vcs,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse> {
         let prompt = crate::executor::build_prompt(task, repo.pre_prompt.as_deref());
@@ -48,6 +49,7 @@ impl Executor for GeminiExecutor {
             task,
             worktree_path,
             repo,
+            vcs,
             output_tx,
             args,
         )

@@ -25,6 +25,11 @@ impl WorktreeManager {
         }
     }
 
+    /// Provides access to the underlying `Vcs` trait object.
+    pub fn vcs(&self) -> &dyn Vcs {
+        self.vcs.as_ref()
+    }
+
     /// Returns the directory where worktrees are stored for this repository
     pub fn worktrees_dir(&self) -> Result<PathBuf> {
         let proj_dirs = directories::ProjectDirs::from("", "", "lelouch")

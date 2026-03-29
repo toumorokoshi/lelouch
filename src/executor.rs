@@ -32,6 +32,7 @@ pub trait Executor: Send + Sync {
         task: &Task,
         worktree_path: &Path,
         repo: &RepoConfig,
+        vcs: &dyn crate::vcs::Vcs,
         output_tx: OutputTx,
     ) -> Result<ExecutionResponse>;
 }
@@ -74,6 +75,7 @@ pub async fn run_container(
     task: &Task,
     worktree_path: &Path,
     repo: &RepoConfig,
+    vcs: &dyn crate::vcs::Vcs,
     output_tx: OutputTx,
     args: Vec<String>,
 ) -> Result<(String, std::process::ExitStatus)> {
@@ -98,32 +100,22 @@ pub async fn run_container(
             cmd.arg("-v")
                 .arg(format!("{}:/root/{}", home_cred_dir.display(), cred_dir));
         }
-
-        let gitconfig_path = home_dir.join(".gitconfig");
-        if gitconfig_path.exists() {
-            cmd.arg("-v")
-                .arg(format!("{}:/root/.gitconfig:ro", gitconfig_path.display()));
-        }
-
-        let config_git_path = home_dir.join(".config").join("git");
-        if config_git_path.exists() {
-            cmd.arg("-v").arg(format!(
-                "{}:/root/.config/git:ro",
-                config_git_path.display()
-            ));
-        }
     }
 
     let repo_path = repo
         .resolved_path()
         .context("failed to resolve repo path")?;
-    let host_git_dir = repo_path.join(".git");
 
-    cmd.arg("-v").arg(format!(
-        "{}:{}",
-        host_git_dir.display(),
-        host_git_dir.display()
-    ));
+    for (host_path, container_path, read_only) in vcs.get_required_mounts(&repo_path)? {
+        let ro = if read_only { ":ro" } else { "" };
+        cmd.arg("-v").arg(format!(
+            "{}:{}{}",
+            host_path.display(),
+            container_path.display(),
+            ro
+        ));
+    }
+
     cmd.arg("-v").arg(format!(
         "{}:{}",
         worktree_path.display(),

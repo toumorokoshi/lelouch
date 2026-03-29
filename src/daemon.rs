@@ -425,7 +425,7 @@ async fn dispatch_task(
         ));
     }
 
-    let run = executor.execute(task, &worktree_path, repo, output_tx);
+    let run = executor.execute(task, &worktree_path, repo, wt_manager.vcs(), output_tx);
 
     let result = tokio::select! {
         res = run => res,

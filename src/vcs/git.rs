@@ -66,6 +66,42 @@ impl Vcs for GitVcs {
 
         Ok(())
     }
+
+    fn get_required_mounts(
+        &self,
+        repo_path: &Path,
+    ) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf, bool)>> {
+        let mut mounts = Vec::new();
+
+        let host_git_dir = repo_path.join(".git");
+        if host_git_dir.exists() {
+            mounts.push((host_git_dir.clone(), host_git_dir, false));
+        }
+
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let home_dir = base_dirs.home_dir();
+
+            let gitconfig_path = home_dir.join(".gitconfig");
+            if gitconfig_path.exists() {
+                mounts.push((
+                    gitconfig_path,
+                    std::path::PathBuf::from("/root/.gitconfig"),
+                    true,
+                ));
+            }
+
+            let config_git_path = home_dir.join(".config").join("git");
+            if config_git_path.exists() {
+                mounts.push((
+                    config_git_path,
+                    std::path::PathBuf::from("/root/.config/git"),
+                    true,
+                ));
+            }
+        }
+
+        Ok(mounts)
+    }
 }
 
 impl GitVcs {

@@ -10,4 +10,9 @@ pub trait Vcs: Send + Sync {
     fn remove_worktree(&self, repo_path: &Path, worktree_path: &Path) -> Result<()>;
     /// Resets the worktree at `worktree_path` to the upstream merge-base of `repo_path`.
     fn reset_worktree(&self, repo_path: &Path, worktree_path: &Path) -> Result<()>;
+    /// Returns a list of (host_path, container_path, read_only) required to be mounted in the container.
+    fn get_required_mounts(
+        &self,
+        repo_path: &Path,
+    ) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf, bool)>>;
 }
