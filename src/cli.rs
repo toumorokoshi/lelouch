@@ -51,9 +51,9 @@ pub enum Commands {
         #[arg(long)]
         max_workers: Option<usize>,
 
-        /// Optional path to a custom Dockerfile.
+        /// Docker image to use for the agent.
         #[arg(long)]
-        dockerfile: Option<String>,
+        docker_image_name: String,
     },
 
     /// Queue management commands.

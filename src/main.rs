@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
         pre_prompt,
         model,
         max_workers,
-        dockerfile,
+        docker_image_name,
     } = &cli.command
     {
         let abs_path = std::fs::canonicalize(path)
@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
             pre_prompt.as_deref(),
             model.as_deref(),
             *max_workers,
-            dockerfile.as_deref(),
+            docker_image_name.as_str(),
         )?;
         println!("Added repository '{repo_name}' ({path_str})");
         println!("  executor: {executor}");
@@ -72,9 +72,7 @@ async fn main() -> Result<()> {
         if let Some(mw) = max_workers {
             println!("  max workers: {mw}");
         }
-        if let Some(df) = dockerfile {
-            println!("  dockerfile: {df}");
-        }
+        println!("  docker_image_name: {docker_image_name}");
         println!("  config: {}", cfg_path.display());
         return Ok(());
     }

@@ -1,8 +1,11 @@
 use crate::config::RepoConfig;
 use crate::work_db::Task;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 use tokio::sync::mpsc;
+use tracing::info;
 
 /// Result of executor run: optional response text to post as a comment on the issue.
 pub type ExecutionResponse = Option<String>;
@@ -43,8 +46,9 @@ pub fn build_prompt(task: &Task, pre_prompt: Option<&str>) -> String {
     }
     let mut task_prompt = format!("Work on issue {}: {}", task.id, task.title);
     if let Some(ref desc) = task.description {
-        if !desc.is_empty() {
-            task_prompt.push_str(&format!("\n\nDescription:\n{desc}"));
+        let desc_str: &str = desc;
+        if !desc_str.is_empty() {
+            task_prompt.push_str(&format!("\n\nDescription:\n{desc_str}"));
         }
     }
     parts.push(task_prompt);
@@ -60,4 +64,88 @@ pub fn resolve_executor(name: &str) -> Result<Box<dyn Executor>> {
         )),
         other => anyhow::bail!("unknown executor: {other}"),
     }
+}
+
+/// Helper to build a Docker image and run a container with the given arguments.
+/// Mounts the worktree and an optional credential directory.
+pub async fn run_container(
+    executor_name: &str,
+    credential_dir_name: Option<&str>,
+    task: &Task,
+    worktree_path: &Path,
+    repo: &RepoConfig,
+    output_tx: OutputTx,
+    args: Vec<String>,
+) -> Result<(String, std::process::ExitStatus)> {
+    let image_name = &repo.docker_image_name;
+
+    info!(
+        task_id = task.id,
+        executor = executor_name,
+        repo = %repo.name,
+        image = %image_name,
+        "spawning docker container"
+    );
+
+    let mut cmd = Command::new("docker");
+    cmd.arg("run").arg("--rm").arg("-i");
+
+    if let Some(cred_dir) = credential_dir_name {
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let home_cred_dir = base_dirs.home_dir().join(cred_dir);
+            cmd.arg("-v")
+                .arg(format!("{}:/root/{}", home_cred_dir.display(), cred_dir));
+        }
+    }
+
+    cmd.arg("-v")
+        .arg(format!("{}:/workspace", worktree_path.display()));
+    cmd.arg("-w").arg("/workspace");
+    cmd.arg(&image_name);
+    cmd.args(args);
+
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context(format!("failed to spawn {}", executor_name))?;
+
+    let stdout_handle = child.stdout.take().context("missing stdout")?;
+    let stderr_handle = child.stderr.take().context("missing stderr")?;
+    let tx_stdout = output_tx.clone();
+    let tx_stderr = output_tx.clone();
+
+    let read_stdout = async {
+        let mut out = String::new();
+        let mut reader = BufReader::new(stdout_handle).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            out.push_str(&line);
+            out.push('\n');
+            if let Some(ref tx) = tx_stdout {
+                let _ = tx.send(line).await;
+            }
+        }
+        out
+    };
+    let read_stderr = async {
+        let mut out = String::new();
+        let mut reader = BufReader::new(stderr_handle);
+        let mut line = String::new();
+        while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+            out.push_str("[stderr] ");
+            out.push_str(&line);
+            if let Some(ref tx) = tx_stderr {
+                let _ = tx.send(format!("[stderr] {}", line.trim_end())).await;
+            }
+            line.clear();
+        }
+        out
+    };
+
+    let (stdout_acc, stderr_acc) = tokio::join!(read_stdout, read_stderr);
+    let mut accumulated = stdout_acc;
+    accumulated.push_str(&stderr_acc);
+
+    let status = child.wait().await.context("waiting for container")?;
+    Ok((accumulated, status))
 }
