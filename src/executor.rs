@@ -90,11 +90,27 @@ pub async fn run_container(
     let mut cmd = Command::new("docker");
     cmd.arg("run").arg("--rm").arg("-i");
 
-    if let Some(cred_dir) = credential_dir_name {
-        if let Some(base_dirs) = directories::BaseDirs::new() {
-            let home_cred_dir = base_dirs.home_dir().join(cred_dir);
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let home_dir = base_dirs.home_dir();
+
+        if let Some(cred_dir) = credential_dir_name {
+            let home_cred_dir = home_dir.join(cred_dir);
             cmd.arg("-v")
                 .arg(format!("{}:/root/{}", home_cred_dir.display(), cred_dir));
+        }
+
+        let gitconfig_path = home_dir.join(".gitconfig");
+        if gitconfig_path.exists() {
+            cmd.arg("-v")
+                .arg(format!("{}:/root/.gitconfig:ro", gitconfig_path.display()));
+        }
+
+        let config_git_path = home_dir.join(".config").join("git");
+        if config_git_path.exists() {
+            cmd.arg("-v").arg(format!(
+                "{}:/root/.config/git:ro",
+                config_git_path.display()
+            ));
         }
     }
 
