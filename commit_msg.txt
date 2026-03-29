@@ -1,0 +1,12 @@
+fix: address ci pipeline failures and implement dynamic worker execution
+
+The current architecture lacked isolation and required dependencies to be pre-installed on the host machine, leading to scalability and security issues. Furthermore, recent changes introduced clippy warnings resulting in CI failures.
+
+- `AGENTS.md`: Update AI instructions to reflect new commit and formatting requirements.
+- `design/v0.2-dynamic-workers.md`: Update dynamic worker architecture design plan.
+- `examples`: Add `agent.Dockerfile` as an example container configuration.
+- `justfile`: Add new tasks to build test containers.
+- `src/daemon.rs`: Integrate worktree cleanup on daemon exit or task completion.
+- `src/executor.rs`: Fix clippy warnings when passing image names to `Command::arg`.
+- `src/executors`: Refactor `cursor_agent` and `gemini` executors to dispatch tasks via the shared `run_container` function.
+- `src/vcs` & `src/worktree.rs`: Support automatic git worktree cleanup and abstraction.

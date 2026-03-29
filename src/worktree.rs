@@ -66,4 +66,13 @@ impl WorktreeManager {
 
         Ok(())
     }
+
+    /// Resets the nth worktree to the upstream merge base
+    pub fn reset_worktree(&self, index: usize) -> Result<()> {
+        let p = self.worktree_path(index)?;
+        if p.exists() {
+            self.vcs.reset_worktree(&self.repo_base_path, &p)?;
+        }
+        Ok(())
+    }
 }

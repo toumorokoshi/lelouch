@@ -8,4 +8,6 @@ pub trait Vcs: Send + Sync {
     fn create_worktree(&self, repo_path: &Path, worktree_path: &Path) -> Result<()>;
     /// Removes the worktree at `worktree_path` from the repository at `repo_path`.
     fn remove_worktree(&self, repo_path: &Path, worktree_path: &Path) -> Result<()>;
+    /// Resets the worktree at `worktree_path` to the upstream merge-base of `repo_path`.
+    fn reset_worktree(&self, repo_path: &Path, worktree_path: &Path) -> Result<()>;
 }

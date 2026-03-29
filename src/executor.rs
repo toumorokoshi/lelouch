@@ -101,7 +101,7 @@ pub async fn run_container(
     cmd.arg("-v")
         .arg(format!("{}:/workspace", worktree_path.display()));
     cmd.arg("-w").arg("/workspace");
-    cmd.arg(&image_name);
+    cmd.arg(image_name);
     cmd.args(args);
 
     let mut child = cmd

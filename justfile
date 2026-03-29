@@ -11,3 +11,5 @@ fix:
     # allow no vcs to enable jujutsu
     cargo fix --allow-dirty --allow-staged --allow-no-vcs
     cargo clippy --fix --allow-no-vcs --allow-dirty --allow-staged -- -D warnings
+docker-build:
+    docker build -t lelouch-agent -f examples/agent.Dockerfile examples
