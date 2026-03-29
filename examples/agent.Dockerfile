@@ -23,7 +23,7 @@ RUN curl -fsSL https://cursor.sh/install.sh | bash
 ## Install Gemini CLI
 RUN npm install -g @google/gemini-cli
 
-# Set the working directory (this is where the worktree will be mounted)
+# Default working directory (lelouch will override this and mount the worktree to its absolute host path)
 WORKDIR /workspace
 
 # Default command (this will be overridden by lelouch)

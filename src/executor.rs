@@ -98,9 +98,22 @@ pub async fn run_container(
         }
     }
 
-    cmd.arg("-v")
-        .arg(format!("{}:/workspace", worktree_path.display()));
-    cmd.arg("-w").arg("/workspace");
+    let repo_path = repo
+        .resolved_path()
+        .context("failed to resolve repo path")?;
+    let host_git_dir = repo_path.join(".git");
+
+    cmd.arg("-v").arg(format!(
+        "{}:{}",
+        host_git_dir.display(),
+        host_git_dir.display()
+    ));
+    cmd.arg("-v").arg(format!(
+        "{}:{}",
+        worktree_path.display(),
+        worktree_path.display()
+    ));
+    cmd.arg("-w").arg(worktree_path.display().to_string());
     cmd.arg(image_name);
     cmd.args(args);
 
