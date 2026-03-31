@@ -2,6 +2,8 @@
 
 lelouch is a coding-focused orchestration system for agents.
 
+*WARNING*: this project is a work in progress! The design is likely to change. Use at your own risk.
+
 ## Problem Statement
 
 Code agent frameworks and tools (Claude Code, Cursor CLI, Cursor, etc) are advancing rapidly, but still have their papercuts when it comes to more complex agent orchestration.
