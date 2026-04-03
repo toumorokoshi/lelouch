@@ -83,7 +83,7 @@ pub async fn run_container(
 
     let mut cmd;
 
-    if repo.no_sandbox {
+    if repo.no_sandbox || repo.in_repo {
         info!(
             task_id = task.id,
             executor = executor_name,

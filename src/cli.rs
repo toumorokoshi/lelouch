@@ -58,6 +58,10 @@ pub enum Commands {
         /// Run the agent directly instead of within a docker container.
         #[arg(long)]
         no_sandbox: bool,
+
+        /// Run a single worker directly inside the repository without creating worktrees. implies --no-sandbox.
+        #[arg(long)]
+        in_repo: bool,
     },
 
     /// Queue management commands.

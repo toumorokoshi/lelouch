@@ -195,26 +195,33 @@ async fn run_worker(
         }
     };
 
+    let effective_max_workers = if repo.in_repo {
+        1
+    } else {
+        repo.max_worker_count
+    };
     let wt_manager = Arc::new(crate::worktree::WorktreeManager::new(
         repo.name.clone(),
         repo_path.clone(),
-        repo.max_worker_count,
+        effective_max_workers,
         Box::new(crate::vcs::git::GitVcs),
     ));
 
-    if let Err(e) = wt_manager.sync_worktrees() {
-        error!(repo = %repo.name, error = %e, "failed to sync worktrees");
-        return;
+    if !repo.in_repo {
+        if let Err(e) = wt_manager.sync_worktrees() {
+            error!(repo = %repo.name, error = %e, "failed to sync worktrees");
+            return;
+        }
     }
 
     let mut interval =
         tokio::time::interval(tokio::time::Duration::from_secs(repo.poll_interval_secs));
     let in_flight = Arc::new(Mutex::new(HashSet::new()));
     let available_worktrees = Arc::new(Mutex::new(
-        (0..repo.max_worker_count).collect::<Vec<usize>>(),
+        (0..effective_max_workers).collect::<Vec<usize>>(),
     ));
 
-    info!(repo = %repo.name, interval = repo.poll_interval_secs, workers = repo.max_worker_count, "worker started");
+    info!(repo = %repo.name, interval = repo.poll_interval_secs, workers = effective_max_workers, "worker started");
 
     loop {
         tokio::select! {
@@ -341,18 +348,24 @@ async fn dispatch_task(
 ) -> Result<(), ()> {
     let task_id = task.id.clone();
 
-    let worktree_path = match wt_manager.worktree_path(wt_index) {
-        Ok(p) => p,
-        Err(e) => {
-            error!(repo = %repo.name, error = %e, wt_index = wt_index, "failed to get worktree path");
-            in_flight.lock().await.remove(&task_id);
-            return Ok(());
+    let worktree_path = if repo.in_repo {
+        repo_path.to_path_buf()
+    } else {
+        match wt_manager.worktree_path(wt_index) {
+            Ok(p) => p,
+            Err(e) => {
+                error!(repo = %repo.name, error = %e, wt_index = wt_index, "failed to get worktree path");
+                in_flight.lock().await.remove(&task_id);
+                return Ok(());
+            }
         }
     };
 
-    if let Err(e) = wt_manager.reset_worktree(wt_index) {
-        error!(repo = %repo.name, error = %e, wt_index = wt_index, "failed to reset worktree");
-        // still proceed but log error
+    if !repo.in_repo {
+        if let Err(e) = wt_manager.reset_worktree(wt_index) {
+            error!(repo = %repo.name, error = %e, wt_index = wt_index, "failed to reset worktree");
+            // still proceed but log error
+        }
     }
 
     if let Err(e) = work_db.set_in_progress(&task.id, repo_path) {
