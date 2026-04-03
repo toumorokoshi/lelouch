@@ -41,6 +41,9 @@ pub struct RepoConfig {
     pub max_worker_count: usize,
     /// Docker image to use for the agent container.
     pub docker_image_name: String,
+    /// If true, executes the agent directly on the host rather than within a docker container.
+    #[serde(default)]
+    pub no_sandbox: bool,
 }
 
 fn default_poll_interval() -> u64 {
@@ -92,6 +95,7 @@ pub fn add_repo(
     model: Option<&str>,
     max_worker_count: Option<usize>,
     docker_image_name: &str,
+    no_sandbox: bool,
 ) -> Result<PathBuf> {
     let cfg_path = match config_override {
         Some(p) => PathBuf::from(p),
@@ -121,6 +125,7 @@ pub fn add_repo(
         model: model.map(String::from),
         max_worker_count: max_worker_count.unwrap_or_else(default_max_worker_count),
         docker_image_name: docker_image_name.to_string(),
+        no_sandbox,
     });
 
     // Ensure parent directory exists
@@ -169,6 +174,7 @@ docker_image_name = "alpine:latest"
         assert_eq!(config.repositories[0].model, None);
         assert_eq!(config.repositories[0].max_worker_count, 1);
         assert_eq!(config.repositories[0].docker_image_name, "ubuntu:24.04");
+        assert_eq!(config.repositories[0].no_sandbox, false);
         assert_eq!(config.repositories[1].poll_interval_secs, 120);
 
         let with_pre = r#"
@@ -180,6 +186,7 @@ pre_prompt = "Always write tests first."
 model = "gpt-4"
 max_worker_count = 3
 docker_image_name = "my-custom-agent:latest"
+no_sandbox = true
 "#;
         let config: Config = toml::from_str(with_pre).unwrap();
         assert_eq!(
@@ -192,5 +199,6 @@ docker_image_name = "my-custom-agent:latest"
             config.repositories[0].docker_image_name,
             "my-custom-agent:latest"
         );
+        assert_eq!(config.repositories[0].no_sandbox, true);
     }
 }

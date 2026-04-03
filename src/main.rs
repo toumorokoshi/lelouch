@@ -39,6 +39,7 @@ async fn main() -> Result<()> {
         model,
         max_workers,
         docker_image_name,
+        no_sandbox,
     } = &cli.command
     {
         let abs_path = std::fs::canonicalize(path)
@@ -60,6 +61,7 @@ async fn main() -> Result<()> {
             model.as_deref(),
             *max_workers,
             docker_image_name.as_str(),
+            *no_sandbox,
         )?;
         println!("Added repository '{repo_name}' ({path_str})");
         println!("  executor: {executor}");
@@ -73,6 +75,7 @@ async fn main() -> Result<()> {
             println!("  max workers: {mw}");
         }
         println!("  docker_image_name: {docker_image_name}");
+        println!("  no_sandbox: {no_sandbox}");
         println!("  config: {}", cfg_path.display());
         return Ok(());
     }

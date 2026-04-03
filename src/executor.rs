@@ -81,49 +81,65 @@ pub async fn run_container(
 ) -> Result<(String, std::process::ExitStatus)> {
     let image_name = &repo.docker_image_name;
 
-    info!(
-        task_id = task.id,
-        executor = executor_name,
-        repo = %repo.name,
-        image = %image_name,
-        "spawning docker container"
-    );
+    let mut cmd;
 
-    let mut cmd = Command::new("docker");
-    cmd.arg("run").arg("--rm").arg("-i");
-
-    if let Some(base_dirs) = directories::BaseDirs::new() {
-        let home_dir = base_dirs.home_dir();
-
-        if let Some(cred_dir) = credential_dir_name {
-            let home_cred_dir = home_dir.join(cred_dir);
-            cmd.arg("-v")
-                .arg(format!("{}:/root/{}", home_cred_dir.display(), cred_dir));
+    if repo.no_sandbox {
+        info!(
+            task_id = task.id,
+            executor = executor_name,
+            repo = %repo.name,
+            "spawning native process (no sandbox)"
+        );
+        cmd = Command::new(&args[0]);
+        if args.len() > 1 {
+            cmd.args(&args[1..]);
         }
-    }
+        cmd.current_dir(worktree_path);
+    } else {
+        info!(
+            task_id = task.id,
+            executor = executor_name,
+            repo = %repo.name,
+            image = %image_name,
+            "spawning docker container"
+        );
 
-    let repo_path = repo
-        .resolved_path()
-        .context("failed to resolve repo path")?;
+        cmd = Command::new("docker");
+        cmd.arg("run").arg("--rm").arg("-i");
 
-    for (host_path, container_path, read_only) in vcs.get_required_mounts(&repo_path)? {
-        let ro = if read_only { ":ro" } else { "" };
+        if let Some(base_dirs) = directories::BaseDirs::new() {
+            let home_dir = base_dirs.home_dir();
+
+            if let Some(cred_dir) = credential_dir_name {
+                let home_cred_dir = home_dir.join(cred_dir);
+                cmd.arg("-v")
+                    .arg(format!("{}:/root/{}", home_cred_dir.display(), cred_dir));
+            }
+        }
+
+        let repo_path = repo
+            .resolved_path()
+            .context("failed to resolve repo path")?;
+
+        for (host_path, container_path, read_only) in vcs.get_required_mounts(&repo_path)? {
+            let ro = if read_only { ":ro" } else { "" };
+            cmd.arg("-v").arg(format!(
+                "{}:{}{}",
+                host_path.display(),
+                container_path.display(),
+                ro
+            ));
+        }
+
         cmd.arg("-v").arg(format!(
-            "{}:{}{}",
-            host_path.display(),
-            container_path.display(),
-            ro
+            "{}:{}",
+            worktree_path.display(),
+            worktree_path.display()
         ));
+        cmd.arg("-w").arg(worktree_path.display().to_string());
+        cmd.arg(image_name);
+        cmd.args(args);
     }
-
-    cmd.arg("-v").arg(format!(
-        "{}:{}",
-        worktree_path.display(),
-        worktree_path.display()
-    ));
-    cmd.arg("-w").arg(worktree_path.display().to_string());
-    cmd.arg(image_name);
-    cmd.args(args);
 
     let mut child = cmd
         .stdout(std::process::Stdio::piped())
