@@ -44,13 +44,15 @@ impl Executor for GeminiExecutor {
         }
 
         let (accumulated, status) = crate::executor::run_container(
-            "gemini",
-            Some(".gemini"),
-            task,
-            worktree_path,
-            repo,
-            vcs,
-            output_tx,
+            crate::executor::RunContainerOptions {
+                executor_name: "gemini",
+                credential_dir_name: Some(".gemini"),
+                task,
+                worktree_path,
+                repo,
+                vcs,
+                output_tx,
+            },
             args,
         )
         .await?;

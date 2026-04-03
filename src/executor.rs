@@ -67,42 +67,48 @@ pub fn resolve_executor(name: &str) -> Result<Box<dyn Executor>> {
     }
 }
 
+/// Options for running an executor in a container or natively.
+pub struct RunContainerOptions<'a> {
+    pub executor_name: &'a str,
+    pub credential_dir_name: Option<&'a str>,
+    pub task: &'a Task,
+    pub worktree_path: &'a Path,
+    pub repo: &'a RepoConfig,
+    pub vcs: &'a dyn crate::vcs::Vcs,
+    pub output_tx: OutputTx,
+}
+
 /// Helper to build a Docker image and run a container with the given arguments.
 /// Mounts the worktree and an optional credential directory.
 pub async fn run_container(
-    executor_name: &str,
-    credential_dir_name: Option<&str>,
-    task: &Task,
-    worktree_path: &Path,
-    repo: &RepoConfig,
-    vcs: &dyn crate::vcs::Vcs,
-    output_tx: OutputTx,
+    opts: RunContainerOptions<'_>,
     args: Vec<String>,
 ) -> Result<(String, std::process::ExitStatus)> {
     let mut cmd;
 
-    if repo.no_sandbox || repo.in_repo {
+    if opts.repo.no_sandbox || opts.repo.in_repo {
         info!(
-            task_id = task.id,
-            executor = executor_name,
-            repo = %repo.name,
+            task_id = opts.task.id,
+            executor = opts.executor_name,
+            repo = %opts.repo.name,
             "spawning native process (no sandbox)"
         );
         cmd = Command::new(&args[0]);
         if args.len() > 1 {
             cmd.args(&args[1..]);
         }
-        cmd.current_dir(worktree_path);
+        cmd.current_dir(opts.worktree_path);
     } else {
-        let image_name = repo
+        let image_name = opts
+            .repo
             .docker_image_name
             .as_deref()
             .context("docker_image_name must be configured when not running natively")?;
 
         info!(
-            task_id = task.id,
-            executor = executor_name,
-            repo = %repo.name,
+            task_id = opts.task.id,
+            executor = opts.executor_name,
+            repo = %opts.repo.name,
             image = %image_name,
             "spawning docker container"
         );
@@ -113,18 +119,19 @@ pub async fn run_container(
         if let Some(base_dirs) = directories::BaseDirs::new() {
             let home_dir = base_dirs.home_dir();
 
-            if let Some(cred_dir) = credential_dir_name {
+            if let Some(cred_dir) = opts.credential_dir_name {
                 let home_cred_dir = home_dir.join(cred_dir);
                 cmd.arg("-v")
                     .arg(format!("{}:/root/{}", home_cred_dir.display(), cred_dir));
             }
         }
 
-        let repo_path = repo
+        let repo_path = opts
+            .repo
             .resolved_path()
             .context("failed to resolve repo path")?;
 
-        for (host_path, container_path, read_only) in vcs.get_required_mounts(&repo_path)? {
+        for (host_path, container_path, read_only) in opts.vcs.get_required_mounts(&repo_path)? {
             let ro = if read_only { ":ro" } else { "" };
             cmd.arg("-v").arg(format!(
                 "{}:{}{}",
@@ -136,10 +143,10 @@ pub async fn run_container(
 
         cmd.arg("-v").arg(format!(
             "{}:{}",
-            worktree_path.display(),
-            worktree_path.display()
+            opts.worktree_path.display(),
+            opts.worktree_path.display()
         ));
-        cmd.arg("-w").arg(worktree_path.display().to_string());
+        cmd.arg("-w").arg(opts.worktree_path.display().to_string());
         cmd.arg(image_name);
         cmd.args(args);
     }
@@ -148,12 +155,12 @@ pub async fn run_container(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .context(format!("failed to spawn {}", executor_name))?;
+        .context(format!("failed to spawn {}", opts.executor_name))?;
 
     let stdout_handle = child.stdout.take().context("missing stdout")?;
     let stderr_handle = child.stderr.take().context("missing stderr")?;
-    let tx_stdout = output_tx.clone();
-    let tx_stderr = output_tx.clone();
+    let tx_stdout = opts.output_tx.clone();
+    let tx_stderr = opts.output_tx.clone();
 
     let read_stdout = async {
         let mut out = String::new();

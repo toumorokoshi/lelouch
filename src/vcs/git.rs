@@ -56,7 +56,7 @@ impl Vcs for GitVcs {
         let clean_status = Command::new("git")
             .current_dir(worktree_path)
             .arg("clean")
-            .arg("-fdx")
+            .arg("-fd")
             .status()
             .context("failed to execute git clean")?;
 

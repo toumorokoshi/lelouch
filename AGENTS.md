@@ -1,14 +1,12 @@
 # Agent instructions
 
-When editing Rust code in this repo:
+For agents, follow the fllowing workflow when developing:
 
-- **Run `cargo fmt --all` every time** after making changes (or before finishing a task). CI enforces formatting with `cargo fmt --all -- --check`.
-
-## Committing code
-
-- **unless** the prompt contains "don't commit", commit the code.
-- **unless** the prompt contains "don't push", push the code.
-
-- Use the conventional commit format for commit messages.
-- The commit description must explain the problem first.
-- The commit description must a summary of each area modified.
+1. perform the prompt.
+2. if code was not modified skip the following steps.
+3. run `just fix`
+4. run `just test`. Fix all failures.
+5. unless the prompt says not to, commit and push the code
+   5a. use the conventional commit format for commit messages.
+   5b. The commit description must explain the problem first.
+   5c. The commit description must a summary of each area modified.

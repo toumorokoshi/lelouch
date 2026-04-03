@@ -387,11 +387,9 @@ async fn dispatch_task(
             error!(repo = %repo.name, error = %e, "failed to reset main repository branch");
             // still proceed but log error
         }
-    } else {
-        if let Err(e) = wt_manager.reset_worktree(wt_index) {
-            error!(repo = %repo.name, error = %e, wt_index = wt_index, "failed to reset worktree");
-            // still proceed but log error
-        }
+    } else if let Err(e) = wt_manager.reset_worktree(wt_index) {
+        error!(repo = %repo.name, error = %e, wt_index = wt_index, "failed to reset worktree");
+        // still proceed but log error
     }
 
     if let Err(e) = work_db.set_in_progress(&task.id, repo_path) {

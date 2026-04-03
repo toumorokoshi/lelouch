@@ -72,13 +72,15 @@ impl Executor for CursorAgentExecutor {
         }
 
         let (accumulated, status) = crate::executor::run_container(
-            "cursor-agent",
-            Some(".cursor"),
-            task,
-            worktree_path,
-            repo,
-            vcs,
-            output_tx,
+            crate::executor::RunContainerOptions {
+                executor_name: "cursor-agent",
+                credential_dir_name: Some(".cursor"),
+                task,
+                worktree_path,
+                repo,
+                vcs,
+                output_tx,
+            },
             args,
         )
         .await?;
