@@ -127,7 +127,13 @@ impl Daemon {
                                             if should_stop {
                                                 if let Some(handle) = workers.remove(name) {
                                                     info!(repo = %name, "stopping worker for repository");
-                                                    states.lock().await.remove(name);
+                                                    {
+                                                        let mut states_guard = states.lock().await;
+                                                        states_guard.remove(name);
+                                                        // Also remove any suffixed worker entries (e.g. "name-0")
+                                                        let prefix = format!("{}-", name);
+                                                        states_guard.retain(|k, _| k != name && !k.starts_with(&prefix));
+                                                    }
                                                     let _ = notify_tx.try_send(());
                                                     handle.abort();
                                                 }
@@ -138,9 +144,6 @@ impl Daemon {
                                         for (name, new_repo) in new_repos.iter() {
                                             if !workers.contains_key(name) {
                                                 info!(repo = %name, "starting worker for repository");
-                                                states.lock().await.insert(name.clone(), None);
-                                                let _ = notify_tx.try_send(());
-                                                // Quick startup scan
                                                 if let Ok(repo_path) = new_repo.resolved_path() {
                                                     if let Err(e) = self.work_db.full_scan(&repo_path) {
                                                         error!(repo = %name, error = %e, "startup scan failed");
@@ -213,6 +216,20 @@ async fn run_worker(
             return;
         }
     }
+
+    // Initialize worker states
+    {
+        let mut states_guard = states.lock().await;
+        for i in 0..effective_max_workers {
+            let key = if repo.in_repo {
+                repo.name.clone()
+            } else {
+                format!("{}-{}", repo.name, i)
+            };
+            states_guard.insert(key, None);
+        }
+    }
+    let _ = notify_tx.try_send(());
 
     let mut interval =
         tokio::time::interval(tokio::time::Duration::from_secs(repo.poll_interval_secs));
@@ -290,10 +307,12 @@ async fn process_ready_tasks(
                 let task_id = task.id.clone();
                 in_flight_guard.insert(task_id.clone());
 
-                states
-                    .lock()
-                    .await
-                    .insert(format!("{}-{}", repo.name, wt_index), Some(task.clone()));
+                let state_key = if repo.in_repo {
+                    repo.name.clone()
+                } else {
+                    format!("{}-{}", repo.name, wt_index)
+                };
+                states.lock().await.insert(state_key, Some(task.clone()));
                 let _ = notify_tx.try_send(());
 
                 let repo_clone = repo.clone();
@@ -319,10 +338,12 @@ async fn process_ready_tasks(
                     .await;
 
                     available_clone.lock().await.push(wt_index);
-                    states_clone
-                        .lock()
-                        .await
-                        .insert(format!("{}-{}", repo_clone.name, wt_index), None);
+                    let state_key = if repo_clone.in_repo {
+                        repo_clone.name.clone()
+                    } else {
+                        format!("{}-{}", repo_clone.name, wt_index)
+                    };
+                    states_clone.lock().await.insert(state_key, None);
                     let _ = notify_tx_clone.try_send(());
                 });
             }
