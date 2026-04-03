@@ -40,7 +40,7 @@ pub struct RepoConfig {
     #[serde(default = "default_max_worker_count")]
     pub max_worker_count: usize,
     /// Docker image to use for the agent container.
-    pub docker_image_name: String,
+    pub docker_image_name: Option<String>,
     /// If true, executes the agent directly on the host rather than within a docker container.
     #[serde(default)]
     pub no_sandbox: bool,
@@ -97,7 +97,7 @@ pub fn add_repo(
     pre_prompt: Option<&str>,
     model: Option<&str>,
     max_worker_count: Option<usize>,
-    docker_image_name: &str,
+    docker_image_name: Option<&str>,
     no_sandbox: bool,
     in_repo: bool,
 ) -> Result<PathBuf> {
@@ -128,7 +128,7 @@ pub fn add_repo(
         pre_prompt: pre_prompt.map(String::from),
         model: model.map(String::from),
         max_worker_count: max_worker_count.unwrap_or_else(default_max_worker_count),
-        docker_image_name: docker_image_name.to_string(),
+        docker_image_name: docker_image_name.map(String::from),
         no_sandbox,
         in_repo,
     });
@@ -178,7 +178,10 @@ docker_image_name = "alpine:latest"
         assert_eq!(config.repositories[0].pre_prompt, None);
         assert_eq!(config.repositories[0].model, None);
         assert_eq!(config.repositories[0].max_worker_count, 1);
-        assert_eq!(config.repositories[0].docker_image_name, "ubuntu:24.04");
+        assert_eq!(
+            config.repositories[0].docker_image_name.as_deref(),
+            Some("ubuntu:24.04")
+        );
         assert_eq!(config.repositories[0].no_sandbox, false);
         assert_eq!(config.repositories[0].in_repo, false);
         assert_eq!(config.repositories[1].poll_interval_secs, 120);
@@ -203,8 +206,8 @@ in_repo = true
         assert_eq!(config.repositories[0].model.as_deref(), Some("gpt-4"));
         assert_eq!(config.repositories[0].max_worker_count, 3);
         assert_eq!(
-            config.repositories[0].docker_image_name,
-            "my-custom-agent:latest"
+            config.repositories[0].docker_image_name.as_deref(),
+            Some("my-custom-agent:latest")
         );
         assert_eq!(config.repositories[0].no_sandbox, true);
         assert_eq!(config.repositories[0].in_repo, true);

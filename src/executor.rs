@@ -79,8 +79,6 @@ pub async fn run_container(
     output_tx: OutputTx,
     args: Vec<String>,
 ) -> Result<(String, std::process::ExitStatus)> {
-    let image_name = &repo.docker_image_name;
-
     let mut cmd;
 
     if repo.no_sandbox || repo.in_repo {
@@ -96,6 +94,11 @@ pub async fn run_container(
         }
         cmd.current_dir(worktree_path);
     } else {
+        let image_name = repo
+            .docker_image_name
+            .as_deref()
+            .context("docker_image_name must be configured when not running natively")?;
+
         info!(
             task_id = task.id,
             executor = executor_name,

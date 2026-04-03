@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
             pre_prompt.as_deref(),
             model.as_deref(),
             *max_workers,
-            docker_image_name.as_str(),
+            docker_image_name.as_deref(),
             *no_sandbox,
             *in_repo,
         )?;
@@ -76,7 +76,9 @@ async fn main() -> Result<()> {
         if let Some(mw) = max_workers {
             println!("  max workers: {mw}");
         }
-        println!("  docker_image_name: {docker_image_name}");
+        if let Some(img) = docker_image_name {
+            println!("  docker_image_name: {img}");
+        }
         println!("  no_sandbox: {no_sandbox}");
         println!("  in_repo: {in_repo}");
         println!("  config: {}", cfg_path.display());

@@ -53,7 +53,7 @@ pub enum Commands {
 
         /// Docker image to use for the agent.
         #[arg(long)]
-        docker_image_name: String,
+        docker_image_name: Option<String>,
 
         /// Run the agent directly instead of within a docker container.
         #[arg(long)]
