@@ -1,4 +1,4 @@
-# Dyanmic Worker Workflow
+# Dynamic Worktree Workflow
 
 ## Use Case
 
@@ -29,8 +29,8 @@ flowchart LR
     end
 
     subgraph dynamic_workers["~/.lelouch/worktrees/"]
-        W1_L[Dynamic Worktree 1 in Docker]
-        W2_L[Dynamic Worktree 2 in Docker]
+        W1_L[Worktree 1 in Docker]
+        W2_L[Worktree 2 in Docker]
     end
 
     you[You] -->|enqueue| P_B
@@ -40,6 +40,11 @@ flowchart LR
 
     W2_L -->|enqueue| P_B
     P_B -->|consumes| W2_L
+
+    vcs["Version Control"]
+
+    W1_L -->|commit and push| vcs
+    W2_L -->|commit and push| vcs
 ```
 
 ## Setup
