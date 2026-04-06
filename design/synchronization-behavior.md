@@ -42,7 +42,7 @@ shared between the two, which is always safe to reset to — it avoids pulling
 in local-only commits from the main repo's working branch while still
 incorporating everything that has been merged upstream.
 
-In practice, when the main repo's HEAD *is* on the default branch (i.e.
+In practice, when the main repo's HEAD _is_ on the default branch (i.e.
 tracking origin/main), the merge-base equals the latest fetched upstream
 commit, and the worktree gets a full sync.
 
@@ -65,3 +65,11 @@ a freshly fetched, clean state.
 - **No rebase/merge of in-flight work**: Worktrees are fully reset between
   tasks. There is no attempt to carry forward work-in-progress. This is
   by design — each task should start clean.
+
+## Design Discussions
+
+A few different strategies were considered, before landing upon the current one. These include:
+
+- attempting to minimize the remote repository as a the synchronization point (not a blocker but would be nice to not have as a hard requirement).
+
+### Pushing to the remote head dirctly
