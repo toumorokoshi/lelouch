@@ -71,5 +71,6 @@ a freshly fetched, clean state.
 A few different strategies were considered, before landing upon the current one. These include:
 
 - attempting to minimize the remote repository as a the synchronization point (not a blocker but would be nice to not have as a hard requirement).
+- x
 
 ### Pushing to the remote head dirctly
