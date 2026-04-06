@@ -1,36 +1,17 @@
 use crate::config::{self, RepoConfig};
 use crate::executor::resolve_executor;
+use crate::shutdown::ShutdownController;
 use crate::work_db::{Task, WorkDb};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::task::JoinSet;
 use tracing::{error, info};
 
 type SharedState = Arc<Mutex<HashMap<String, Option<Task>>>>;
 
 const STREAM_UPDATE_INTERVAL_SECS: u64 = 5;
-
-/// Future that completes when a shutdown signal (SIGINT or SIGTERM) is received.
-async fn shutdown_signal() {
-    #[cfg(unix)]
-    let sigterm = async {
-        if let Ok(mut sig) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        {
-            sig.recv().await;
-        } else {
-            std::future::pending::<()>().await
-        }
-    };
-    #[cfg(not(unix))]
-    let sigterm = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = sigterm => {}
-    }
-}
 
 async fn run_streaming_updater(
     mut rx: mpsc::Receiver<String>,
@@ -89,7 +70,7 @@ impl Daemon {
     }
 
     /// Run the daemon: spawn workers for configured repositories and watch config for changes.
-    pub async fn run(&self) -> Result<()> {
+    pub async fn run(&self, shutdown: ShutdownController) -> Result<()> {
         info!("lelouch daemon starting");
 
         let mut current_repos: HashMap<String, RepoConfig> = HashMap::new();
@@ -104,7 +85,9 @@ impl Daemon {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    // Check config modification
+                    if shutdown.is_graceful() {
+                        break;
+                    }
                     if let Ok(metadata) = std::fs::metadata(&self.config_path) {
                         if let Ok(modified) = metadata.modified() {
                             if modified > last_modified {
@@ -118,7 +101,6 @@ impl Daemon {
                                             .map(|r| (r.name.clone(), r))
                                             .collect();
 
-                                        // Stop removed or changed repositories
                                         for (name, old_repo) in current_repos.iter() {
                                             let should_stop = match new_repos.get(name) {
                                                 Some(new_repo) => new_repo != old_repo,
@@ -130,7 +112,6 @@ impl Daemon {
                                                     {
                                                         let mut states_guard = states.lock().await;
                                                         states_guard.remove(name);
-                                                        // Also remove any suffixed worker entries (e.g. "name-0")
                                                         let prefix = format!("{}-", name);
                                                         states_guard.retain(|k, _| k != name && !k.starts_with(&prefix));
                                                     }
@@ -140,7 +121,6 @@ impl Daemon {
                                             }
                                         }
 
-                                        // Start new or changed repositories
                                         for (name, new_repo) in new_repos.iter() {
                                             if !workers.contains_key(name) {
                                                 info!(repo = %name, "starting worker for repository");
@@ -155,6 +135,7 @@ impl Daemon {
                                                     self.dry_run,
                                                     Arc::clone(&states),
                                                     notify_tx.clone(),
+                                                    shutdown.clone(),
                                                 ));
                                                 workers.insert(name.clone(), handle);
                                             }
@@ -173,12 +154,18 @@ impl Daemon {
                 Some(_) = notify_rx.recv() => {
                     print_status_table(&states).await;
                 }
-                _ = shutdown_signal() => {
-                    info!("received shutdown signal, exiting");
+                _ = shutdown.wait_graceful() => {
                     break;
                 }
             }
         }
+
+        for (name, handle) in workers {
+            info!(repo = %name, "waiting for worker to drain");
+            let _ = handle.await;
+        }
+
+        info!("all workers finished, exiting");
         Ok(())
     }
 }
@@ -189,6 +176,7 @@ async fn run_worker(
     dry_run: bool,
     states: SharedState,
     notify_tx: mpsc::Sender<()>,
+    shutdown: ShutdownController,
 ) {
     let repo_path = match repo.resolved_path() {
         Ok(p) => p,
@@ -217,7 +205,6 @@ async fn run_worker(
         }
     }
 
-    // Initialize worker states
     {
         let mut states_guard = states.lock().await;
         for i in 0..effective_max_workers {
@@ -237,12 +224,16 @@ async fn run_worker(
     let available_worktrees = Arc::new(Mutex::new(
         (0..effective_max_workers).collect::<Vec<usize>>(),
     ));
+    let mut task_set = JoinSet::new();
 
     info!(repo = %repo.name, interval = repo.poll_interval_secs, workers = effective_max_workers, "worker started");
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                if shutdown.is_graceful() {
+                    break;
+                }
                 if let Err(()) = process_ready_tasks(
                     &repo,
                     &repo_path,
@@ -253,15 +244,24 @@ async fn run_worker(
                     &available_worktrees,
                     &states,
                     &notify_tx,
+                    &mut task_set,
+                    &shutdown,
                 ).await {
                     break;
                 }
             }
-            _ = shutdown_signal() => {
-                info!(repo = %repo.name, "worker shutdown signal received");
+            Some(_) = task_set.join_next() => {}
+            _ = shutdown.wait_graceful() => {
+                info!(repo = %repo.name, "graceful shutdown: no more tasks will be scheduled");
                 break;
             }
         }
+    }
+
+    if !task_set.is_empty() {
+        info!(repo = %repo.name, remaining = task_set.len(), "waiting for in-flight tasks to complete");
+        while task_set.join_next().await.is_some() {}
+        info!(repo = %repo.name, "all in-flight tasks completed");
     }
 }
 
@@ -276,6 +276,8 @@ async fn process_ready_tasks(
     available_worktrees: &Arc<Mutex<Vec<usize>>>,
     states: &SharedState,
     notify_tx: &mpsc::Sender<()>,
+    task_set: &mut JoinSet<()>,
+    shutdown: &ShutdownController,
 ) -> Result<(), ()> {
     let tasks = match work_db.poll_ready(repo_path) {
         Ok(t) => t,
@@ -324,8 +326,9 @@ async fn process_ready_tasks(
                 let notify_tx_clone = notify_tx.clone();
                 let wt_manager_clone = Arc::clone(wt_manager);
                 let repo_path_clone = repo_path.to_path_buf();
+                let shutdown_clone = shutdown.clone();
 
-                tokio::spawn(async move {
+                task_set.spawn(async move {
                     let _ = dispatch_task(
                         &repo_clone,
                         &repo_path_clone,
@@ -334,6 +337,7 @@ async fn process_ready_tasks(
                         &in_flight_clone,
                         wt_index,
                         &wt_manager_clone,
+                        &shutdown_clone,
                     )
                     .await;
 
@@ -348,7 +352,6 @@ async fn process_ready_tasks(
                 });
             }
         } else {
-            // No more available worktrees, break out of loop to wait for next tick or completion
             break;
         }
     }
@@ -357,7 +360,8 @@ async fn process_ready_tasks(
 }
 
 /// Dispatch a single task to the appropriate executor and wait for it to complete.
-/// Returns Err(()) if shutdown was requested during execution (issue was moved back to open).
+/// Returns Err(()) if immediate shutdown was requested (issue moved back to open).
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_task(
     repo: &RepoConfig,
     repo_path: &std::path::Path,
@@ -366,6 +370,7 @@ async fn dispatch_task(
     in_flight: &Arc<Mutex<HashSet<String>>>,
     wt_index: usize,
     wt_manager: &Arc<crate::worktree::WorktreeManager>,
+    shutdown: &ShutdownController,
 ) -> Result<(), ()> {
     let task_id = task.id.clone();
 
@@ -385,11 +390,9 @@ async fn dispatch_task(
     if repo.in_repo {
         if let Err(e) = wt_manager.vcs().reset_worktree(repo_path, repo_path) {
             error!(repo = %repo.name, error = %e, "failed to reset main repository branch");
-            // still proceed but log error
         }
     } else if let Err(e) = wt_manager.reset_worktree(wt_index) {
         error!(repo = %repo.name, error = %e, wt_index = wt_index, "failed to reset worktree");
-        // still proceed but log error
     }
 
     if let Err(e) = work_db.set_in_progress(&task.id, repo_path) {
@@ -466,8 +469,8 @@ async fn dispatch_task(
 
     let result = tokio::select! {
         res = run => res,
-        _ = shutdown_signal() => {
-            info!(task_id = %task.id, "shutdown during task, moving issue back to open");
+        _ = shutdown.wait_immediate() => {
+            info!(task_id = %task.id, "immediate shutdown: moving issue back to open");
             if let Err(e) = work_db.set_open(&task.id, repo_path) {
                 error!(task_id = %task.id, error = %e, "failed to move task back to open");
             }

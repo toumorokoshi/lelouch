@@ -4,6 +4,7 @@ mod config;
 mod daemon;
 mod executor;
 mod executors;
+mod shutdown;
 mod vcs;
 mod work_db;
 mod worktree;
@@ -101,8 +102,37 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Init { .. } => unreachable!(),
         Commands::Run { dry_run } => {
+            let shutdown = shutdown::ShutdownController::new();
+            {
+                let shutdown = shutdown.clone();
+                tokio::spawn(async move {
+                    #[cfg(unix)]
+                    let mut sigterm =
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                            .expect("failed to install SIGTERM handler");
+
+                    loop {
+                        #[cfg(unix)]
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {}
+                            _ = sigterm.recv() => {}
+                        };
+                        #[cfg(not(unix))]
+                        tokio::signal::ctrl_c().await.ok();
+
+                        let phase = shutdown.advance();
+                        match phase {
+                            1 => tracing::info!("graceful shutdown requested — finishing in-flight tasks (press Ctrl-C again to force)"),
+                            _ => {
+                                tracing::info!("immediate shutdown requested — terminating workers");
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
             let daemon = daemon::Daemon::new(cfg_path, work_db, dry_run);
-            daemon.run().await?;
+            daemon.run(shutdown).await?;
         }
         Commands::Queue { command } => match command {
             QueueCommands::Add { repo, title, defer } => {
