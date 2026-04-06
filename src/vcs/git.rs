@@ -39,6 +39,7 @@ impl Vcs for GitVcs {
     }
 
     fn reset_worktree(&self, repo_path: &Path, worktree_path: &Path) -> Result<()> {
+        Self::fetch_upstream(repo_path)?;
         let merge_base = Self::get_merge_base(repo_path)?;
 
         let reset_status = Command::new("git")
@@ -105,6 +106,19 @@ impl Vcs for GitVcs {
 }
 
 impl GitVcs {
+    fn fetch_upstream(repo_path: &Path) -> Result<()> {
+        let status = Command::new("git")
+            .current_dir(repo_path)
+            .args(["fetch", "--quiet"])
+            .status()
+            .context("failed to execute git fetch")?;
+
+        if !status.success() {
+            anyhow::bail!("git fetch failed with exit code: {}", status);
+        }
+        Ok(())
+    }
+
     fn get_merge_base(repo_path: &Path) -> Result<String> {
         // Try @{u}
         let output = Command::new("git")
